@@ -1,0 +1,110 @@
+# Contributor Code of Conduct  
+**NetSpear — OpenNET LLC**
+
+## 1. Purpose
+The NetSpear project is committed to maintaining a professional, respectful, and ethically responsible environment for all contributors.  
+Because NetSpear is a cybersecurity assessment framework, contributors must adhere to strict security, ethical, and legal standards.
+
+This Code of Conduct establishes expectations for participation and identifies behaviors that will not be tolerated.
+
+---
+
+## 2. Expected Behavior
+
+### Professional Conduct
+- Treat all contributors and users with respect and professionalism.
+- Provide constructive feedback and accept feedback graciously.
+- Collaborate openly, transparently, and with integrity.
+- Communicate clearly and avoid unnecessary hostility or passive aggression.
+
+### Ethical & Security Standards
+- Uphold legal and ethical penetration testing practices at all times.
+- Ensure contributions **do not enable, encourage, or facilitate unauthorized hacking**.
+- Follow responsible disclosure procedures when identifying vulnerabilities.
+- Avoid committing sensitive, personal, or confidential information.
+- Ensure code promotes safe, authorized, and compliant use.
+
+### Technical Standards
+- Follow coding conventions defined by the maintainers.
+- Document features, changes, and modules accurately.
+- Write maintainable, clean, and testable code.
+- Report bugs with reproducible examples and clear details.
+
+---
+
+## 3. Unacceptable Behavior
+
+### Abuse or Harassment
+- Personal attacks, harassment, discrimination, or degrading conduct.
+- Doxxing or sharing private information without explicit consent.
+- Threatening, hostile, or intentionally disruptive behavior.
+
+### Illegal or Unethical Activity
+- Submitting code designed for malicious exploitation.
+- Sharing zero-days or exploit code without responsible disclosure.
+- Encouraging unauthorized penetration testing or illegal activities.
+- Misrepresenting affiliation with OpenNET LLC or the NetSpear team.
+
+### Technical Misconduct
+- Introducing malicious code (backdoors, trojans, data exfiltration).
+- Intentionally degrading performance or sabotaging functionality.
+- Including broken, harmful, or security-risk modifications without notice.
+
+---
+
+## 4. Responsibilities of Maintainers
+Maintainers will:
+
+- Review contributions fairly, objectively, and respectfully.
+- Provide clear reasoning for decisions and rejections.
+- Remove contributions that violate legal, ethical, or security standards.
+- Warn or ban users who violate the Code of Conduct.
+- Protect the stability, reputation, and integrity of the NetSpear project.
+
+Maintainers have final authority on enforcement and repository moderation.
+
+---
+
+## 5. Reporting Violations
+
+If you encounter behavior that violates this Code of Conduct, please report it privately and confidentially to the maintainers.
+
+### **Contact (Official Maintainer Support):**  
+**OpenNET LLC — Cybersecurity Division**  
+**OpenNETLLC@gmail.com**   
+Reports will be handled respectfully, promptly, and confidentially.
+---
+
+## 6. Enforcement
+Contributors who violate this Code may face:
+
+- A private or public warning  
+- Temporary suspension from contributing  
+- Permanent ban from the project  
+- Reversion or removal of submitted code  
+- Reporting of serious allegations to relevant authorities (if legal harm is involved)
+
+Maintainers reserve the right to act at their discretion to protect the community and the project.
+
+---
+
+## 7. Scope
+This Code of Conduct applies to:
+
+- All contributions to the repository  
+- Pull requests, issues, comments, and discussions  
+- External community spaces (Discord, forums, emails)  
+- Any interaction representing the NetSpear project or OpenNET LLC  
+
+---
+
+## 8. Acknowledgment
+By contributing to NetSpear, you agree to comply with this Code of Conduct and uphold the ethical standards required for professional cybersecurity development.
+
+Unauthorized, malicious, or illegal use of NetSpear or its modules is strictly prohibited.
+
+---
+
+## 9. Attribution
+This Code of Conduct incorporates best practices from major open-source and cybersecurity projects, adapted specifically for NetSpear and OpenNET LLC.
+

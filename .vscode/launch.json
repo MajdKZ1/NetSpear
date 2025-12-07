@@ -1,0 +1,10 @@
+{
+    "configurations": [
+        {
+            "type": "chrome",
+            "name": "http://127.0.0.1:3000/EchelonX/Reports/network_report_20251123_230557.html",
+            "request": "launch",
+            "url": "http://127.0.0.1:3000/EchelonX/Reports/network_report_20251123_230557.html"
+        }
+    ]
+}

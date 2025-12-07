@@ -1,0 +1,243 @@
+# Contributing to NetSpear  
+Maintained by **OpenNET LLC — Cybersecurity Division**
+
+Thank you for your interest in contributing to **NetSpear** — and helping improve one of the most advanced open-source network reconnaissance and cybersecurity assessment frameworks.  
+Before you begin, please review the **Contributor Code of Conduct** to ensure our community remains respectful, secure, and ethically responsible.
+
+---
+
+# Code-Free Contributions
+You do NOT need to write code to help NetSpear grow. Here are high-impact ways to contribute:
+
+## Submit Bug Reports & Feature Requests
+When requesting a feature, include:
+- What you want added  
+- Why it helps NetSpear users  
+- Optional: mock-ups of CLI menus or workflow steps  
+
+When reporting a bug, include:
+- Expected behavior  
+- Observed behavior  
+- Steps to reproduce  
+- OS, Python version, NetSpear version  
+- Stack traces or console logs (sanitize sensitive data)
+
+**High-detail reports = faster fixes.**
+
+---
+
+## Help Users in Open Issues
+You can:
+- Reproduce bugs  
+- Clarify discussions  
+- Suggest potential fixes  
+- Explain existing functionality  
+
+This helps maintainers and keeps the project healthy.
+
+---
+
+## Test Pull Requests
+You can:
+- Pull and run PRs locally  
+- Report whether features work  
+- Confirm no regressions occur  
+
+Even simple testing is extremely valuable.
+
+---
+
+## Report Security Vulnerabilities
+If you find something that may compromise NetSpear itself, report it privately:
+
+**OpenNET LLC — Cybersecurity Division**  
+📧 OpenNETLLC@gmail.com
+🌐 DM @MajdKZ1
+
+We follow responsible disclosure protocols.
+
+---
+
+## Improve Documentation
+Documentation always needs refinement:
+- Improve clarity  
+- Add module examples  
+- Expand installation steps  
+- Fix grammar or confusing language  
+- Add visuals / CLI outputs  
+
+Non-native English speakers are especially valuable for eliminating ambiguous wording.
+
+---
+
+# Code Contributions
+
+## 1. Set Up Your Environment
+- Fork the repository  
+- Clone your fork  
+- Create a virtual environment  
+- Install dependencies:  
+  ```bash
+  pip install -r requirements.txt
+  ```
+We recommend testing on Linux with Python 3.10+.
+## 2. Good First Contributions
+
+Easier contributions include:
+
+- Adding recon modules  
+- Improving Nmap output parsing  
+- Adding error-handling  
+- Extending the HTML/JSON reporting engine  
+- Adding or refining CLI flags  
+- Adding new payload generator profiles  
+- Building small helper utilities  
+
+These improve NetSpear dramatically without requiring deep exploitation knowledge.
+
+---
+
+# Expedited Module Creation Process  
+*(Modeled after critical workflows of major security projects.)*
+
+Sometimes multiple contributors submit modules for the same feature or vulnerability.
+
+General rule:
+
+- The **first contributor** who assigns themselves or submits a *good-faith PR* gets priority.
+
+A “good-faith PR”:
+
+- Does not need to be complete  
+- Must show real work and functional direction  
+
+If a module is **high-priority** (critical CVE, time-sensitive recon API, CISA KEV item, etc.), maintainers may:
+
+- Ask a contributor to let a committer take over  
+- Extend the PR while keeping original commits  
+- Preserve full authorship credit  
+
+Contributors will **always** be respected and acknowledged, even in expedited workflows.
+
+---
+
+# Vibecoding, AI, and LLM Assistance
+
+NetSpear welcomes ALL coding styles — including AI-assisted work — **as long as:**
+
+- Code works correctly  
+- Code is fully tested  
+- Code is documented  
+- Code does NOT hallucinate nonexistent APIs  
+
+We have seen AI-generated PRs that looked perfect but:
+
+- Did nothing  
+- Crashed instantly  
+- Used imaginary functions  
+
+**Untested code = incomplete code.**  
+Incomplete code should be marked:
+
+- **WIP** (Work in Progress), or  
+- A **Draft PR**
+
+We judge PRs by quality, not by how the code was written.
+
+---
+
+# Code Contribution Do’s & Don’ts
+
+## Pull Requests
+
+### Do:
+- Create a topic/feature branch  
+- Follow the 50/72 commit message rule  
+- Mark drafts as *WIP* or draft  
+- Target PRs to the `main` branch  
+- Include console output (scan results, recon output, etc.)  
+- Add test output (with sensitive data removed)  
+- Provide clean verification steps  
+- Reference issues (`Fixes #42`)  
+- Keep PRs small and focused  
+
+### Don’t:
+- Leave PR descriptions blank  
+- Submit untested or AI-generated code without validation  
+- Include sensitive IPs, credentials, or client data  
+- Abandon your PR  
+- Post questions in old closed PRs  
+
+---
+
+# New Modules
+
+### Do:
+- Check the issue tracker and assign yourself if applicable  
+- Confirm the module does not already exist  
+- Follow the NetSpear Python architecture and style  
+- Use internal helpers (utils, reporting, scanner engine)  
+- Document EVERYTHING:
+  - Purpose  
+  - Parameters  
+  - Sample output  
+  - Setup instructions for testing  
+
+### Don’t:
+- Submit multiple unrelated modules in the same PR  
+- Add modules requiring illegal testing environments  
+- Submit modules that encourage unauthorized exploitation  
+
+---
+
+# Library Code (Core Logic)
+
+### Do:
+- Add/update unit tests  
+- Maintain backward compatibility when possible  
+- Document new helpers, constants, and APIs  
+
+### Don’t:
+- Introduce massive refactors without justification  
+- Break compatibility silently  
+
+---
+
+# Bug Fixes
+
+### Do:
+- Provide reproduction steps  
+- Provide before/after behavior  
+- Link related issues  
+
+---
+
+# Bug Reports
+
+### Do:
+- Use descriptive titles  
+- Include clear reproduction steps  
+- Add logs, errors, and context  
+- Include OS, Python version, and NetSpear version  
+
+### Don’t:
+- File duplicate reports  
+- Include sensitive information  
+- Report issues inside closed PRs  
+
+---
+
+# Security Vulnerabilities
+
+Report privately to:
+
+**OpenNET LLC — Cybersecurity Division**  
+📧 security@opennet-llc.com
+
+
+
+
+
+
+
+

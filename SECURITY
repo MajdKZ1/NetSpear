@@ -1,0 +1,34 @@
+# Reporting Security Issues
+
+If you discover a security vulnerability in NetSpear, **do not open a public issue**.  
+Security vulnerabilities must be reported privately to protect users and prevent exploitation.
+
+To report a security issue, please contact:
+
+**OpenNET LLC — Cybersecurity Division**  
+📧 Email: opennetllc@gmail.com  
+💬 GitHub Direct Message: https://github.com/MajdKZ1  
+
+When submitting a report, please include:
+
+- A clear and detailed description of the vulnerability  
+- Steps to reproduce the issue  
+- The potential impact if exploited  
+- Any logs, screenshots, or proof-of-concept details (remove sensitive data)  
+- Your testing environment:
+  - OS version  
+  - Python version  
+  - NetSpear version  
+  - Installed tools (Nmap, Hydra, Metasploit, etc.)
+
+You can expect the following from us:
+
+- Acknowledgment of your report within **48 hours**  
+- Private investigation into the issue  
+- Regular updates during remediation  
+- Optional public credit for responsible disclosure  
+
+**Reminder:**  
+Do not use NetSpear or any of its modules on systems you do not own or have explicit permission to test. Unauthorized testing may violate laws and regulations.
+
+Thank you for helping keep NetSpear and its users secure.
