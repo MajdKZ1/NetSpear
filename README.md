@@ -18,7 +18,7 @@ Built by **OpenNET LLC**, NetSpear integrates automated reconnaissance, web-laye
 
 - Interactive, menu-driven **NetSpear Network Analyzer** CLI  
 - Scan profiles: `quick`, `full`, `vuln`, `stealth`, `deep`  
-- Scan modes: **SAFE**, **STEALTH**, **AGGRESSIVE**, **INSANE**, **KILLER**  
+- Scan modes: **Safe Scan**, **Stealth Scan**, **Standard Scan**, **Fast Scan**, **Full Scan**  
 - **Multi-target threaded scans**  
 - Optional **rustscan/masscan prescan** for high-speed discovery  
 - Automatic **Nmap service detection**  
@@ -52,6 +52,25 @@ NetSpear/
 ```
 
 ## Installation
+
+### Fast install script (macOS/Linux/Windows)
+
+1) Clone the repo and run the installer
+```
+git clone https://github.com/<your-user>/NetSpear.git
+cd NetSpear
+chmod +x install.sh
+./install.sh
+```
+- macOS/Linux: installs tools via Homebrew/apt/pacman when available, pip installs Python deps, and drops a `netspear` launcher into `/usr/local/bin` or `~/.local/bin`.
+- Windows: run from Git Bash/WSL/PowerShell (with bash available). If `winget` is present, the script uses it for packages; it also creates `netspear.cmd` under `~/AppData/Local/Microsoft/WindowsApps` (or `~/bin`). Add that folder to PATH if needed.
+
+2) Run from anywhere:
+```
+netspear
+```
+
+### Manual install
 
 1. Clone the Repository
 
@@ -115,6 +134,44 @@ Help:
 
 python3 main.py -h
 
+
+### Interactive Menu Overview
+
+```
+[ 1 — RECONNAISSANCE ]
+  01. Passive Recon
+  02. Active Recon
+  03. Information Gathering
+
+[ 2 — SCANNING ]
+  10. Quick Scan
+  11. Full Scan
+  12. Vulnerability Scan
+  13. Stealth Scan
+  14. Multi-Target Scan
+
+[ 3 — EXPLOITATION & ATTACKS ]
+  20. Generate Payloads
+  21. Generate Payload Pack (mode-aware)
+  22. Brute Force Test (mode-aware)
+  23. SYN Flood
+  24. MAC Spoofing
+  25. ARP Spoofing
+  26. DNS Poisoning
+
+[ 4 — REPORTING ]
+  30. Generate Report
+  31. View Gathered Info
+  32. Archive Old Reports
+  33. Clear Reports
+  34. Clear Archives
+
+[ 5 — CONFIGURATION / SYSTEM ]
+  40. Set Mode
+  41. Reset Target
+  00. Exit
+```
+
 ---
 
 ## Scan Profiles (Internal Nmap Mappings)
@@ -134,7 +191,7 @@ Stealth Scan:
 Deep Scan:  
 -sV -sC -O -T5 --min-rate 2000
 
-Modes like **AGGRESSIVE**, **INSANE**, and **KILLER** further tune timing and prescan behavior.
+Modes like **Stealth Scan**, **Standard Scan**, **Fast Scan**, and **Full Scan** further tune timing and prescan behavior.
 
 ---
 

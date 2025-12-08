@@ -49,6 +49,14 @@ MODE_COLORS = {
     "KILLER": "\033[91m",
 }
 
+MODE_LABELS = {
+    "SAFE": "Safe Scan",
+    "STEALTH": "Stealth Scan",
+    "AGGRESSIVE": "Standard Scan",
+    "INSANE": "Fast Scan",
+    "KILLER": "Full Scan",
+}
+
 class NetSpearNetworkAnalyzer:
     def __init__(self):
         setup_logging()
@@ -63,6 +71,32 @@ class NetSpearNetworkAnalyzer:
         self.killer_mode = False
         self.current_target_info: Dict[str, Any] = {}
         self._clear_screen()
+
+    def _mode_label(self, mode: Optional[str] = None) -> str:
+        mode = (mode or self.mode or "").upper()
+        return MODE_LABELS.get(mode, mode.title() if mode else "-")
+
+    def _mode_payload_pack_label(self) -> str:
+        mode = (self.mode or "").upper()
+        variants = {
+            "SAFE": "Generate Payload Pack (Safe payloads)",
+            "STEALTH": "Generate Payload Pack (Stealthy payloads)",
+            "AGGRESSIVE": "Generate Payload Pack (Standard payloads)",
+            "INSANE": "Generate Payload Pack (Fast payloads)",
+            "KILLER": "Generate Payload Pack (Full payloads)",
+        }
+        return variants.get(mode, "Generate Payload Pack")
+
+    def _mode_brute_label(self) -> str:
+        mode = (self.mode or "").upper()
+        variants = {
+            "SAFE": "Brute Force Test (safe timing)",
+            "STEALTH": "Brute Force Test (stealth timing)",
+            "AGGRESSIVE": "Brute Force Test (standard timing)",
+            "INSANE": "Brute Force Test (fast timing)",
+            "KILLER": "Brute Force Test (full throttle)",
+        }
+        return variants.get(mode, "Brute Force Test")
 
     def _cache_target_minimal(self, ip: Optional[str], label: str) -> None:
         if not ip:
@@ -96,7 +130,7 @@ class NetSpearNetworkAnalyzer:
         # Aggressive tiers unlock killer-style suggestions.
         self.killer_mode = mode in {"KILLER", "INSANE", "AGGRESSIVE"}
         color = MODE_COLORS.get(mode, WHITE)
-        print(color + f"[+] Mode set to {mode}" + RESET)
+        print(color + f"[+] Mode set to {self._mode_label(mode)}" + RESET)
         if self.current_target_info:
             self.current_target_info["mode"] = mode
 
@@ -135,7 +169,7 @@ class NetSpearNetworkAnalyzer:
             return
         print(WHITE + "\n=== Gathered Info ===" + RESET)
         print(WHITE + f"Target: {info.get('ip','-')} ({info.get('label','-')})" + RESET)
-        print(WHITE + f"Mode: {info.get('mode','-')}" + RESET)
+        print(WHITE + f"Mode: {self._mode_label(info.get('mode'))}" + RESET)
         print(WHITE + f"Open ports: {info.get('open_ports',0)} | Vulnerabilities: {info.get('vulns',0)} | Web anomalies: {info.get('web_anomalies',0)}" + RESET)
         print(WHITE + f"Last action: {info.get('last_action','-')}" + RESET)
 
@@ -297,6 +331,36 @@ class NetSpearNetworkAnalyzer:
         except Exception as exc:  # noqa: BLE001
             logging.debug("HTTP fingerprint failed for %s: %s", url, exc)
             return {"url": url, "error": str(exc)}
+
+    def _passive_recon(self, ip: Optional[str]) -> None:
+        if not ip:
+            print(WHITE + "No target provided for passive recon." + RESET)
+            return
+        if not validate_ip(ip):
+            return
+        geo = self._geo_lookup(ip)
+        http_info = self._http_fingerprint(f"http://{ip}")
+        recon_entry = {
+            "input": ip,
+            "target": ip,
+            "resolved_ip": ip,
+            "type": "ip",
+            "geo": geo,
+            "http": http_info,
+            "scan": {},
+            "vulnerabilities": [],
+            "suggestions": [],
+            "web_enum": {},
+            "osint": {},
+        }
+        self.reporter.add_recon(recon_entry)
+        self._cache_target_minimal(ip, "Passive Recon")
+        print(WHITE + f"Passive recon cached for {ip}. Geo/IP details added to report." + RESET)
+
+    def _active_recon(self, ip: Optional[str]) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
+        if not ip:
+            return {}, []
+        return self.scanner.run_nmap_scan(ip, "deep", self.args.stealth, self.args.proxy, self.mode)
 
     def information_gathering(self) -> None:
         print(WHITE + "\n=== Target Type ===" + RESET)
@@ -625,11 +689,11 @@ class NetSpearNetworkAnalyzer:
             "5": "KILLER",
         }
         print(WHITE + "\nSelect Mode:" + RESET)
-        print(WHITE + "  [1] SAFE (green)    — minimal footprint, safer defaults" + RESET)
-        print(WHITE + "  [2] STEALTH (cyan)  — low-noise scans/attacks" + RESET)
-        print(WHITE + "  [3] AGGRESSIVE (yellow) — faster scans, more noise" + RESET)
-        print(WHITE + "  [4] INSANE (magenta)  — very fast, minimal retries" + RESET)
-        print(WHITE + "  [5] KILLER (red)    — maximum aggression" + RESET)
+        print(WHITE + "  [1] Safe Scan       – lowest impact, conservative defaults" + RESET)
+        print(WHITE + "  [2] Stealth Scan    – reduced-noise scanning" + RESET)
+        print(WHITE + "  [3] Standard Scan   – balanced speed and coverage" + RESET)
+        print(WHITE + "  [4] Fast Scan       – accelerated scanning, fewer checks" + RESET)
+        print(WHITE + "  [5] Full Scan       – maximum coverage and intensity" + RESET)
         choice = input(WHITE + "Choose mode (1-5): " + RESET).strip()
         mode = modes.get(choice)
         if not mode:
@@ -739,9 +803,9 @@ class NetSpearNetworkAnalyzer:
 
         while True:
             options = self._base_options()
-            killer_actions, killer_sections = self._killer_mode_options()
-            options.update(killer_actions)
-            sections = self._base_sections() + killer_sections
+            mode_actions, mode_sections = self._mode_specific_options()
+            options.update(mode_actions)
+            sections = self._base_sections() + mode_sections
             self._display_menu(sections)
             max_code = max(int(k) for k in options.keys())
             choice = input(WHITE + f"\nEnter your choice (00-{max_code:02d}): " + RESET).strip()
@@ -776,141 +840,49 @@ class NetSpearNetworkAnalyzer:
 
     def _base_options(self) -> Dict[str, Dict[str, Any]]:
         return {
-            "1": {"desc": "Quick Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "quick", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "2": {"desc": "Full Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "full", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "3": {"desc": "Vulnerability Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "vuln", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "4": {"desc": "Stealth Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "stealth", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "5": {"desc": "Multi-Target Scan", "handler": lambda _: self._handle_multi_target_scan(), "needs_target": False},
-            "6": {"desc": "Generate Payloads", "handler": lambda ip: self.payload_generator.generate_payloads(ip), "needs_target": True},
-            "7": {"desc": "Brute Force Test", "handler": lambda ip: self.attacker.brute_force_overdrive(ip), "needs_target": True},
-            "8": {"desc": "ARP Spoofing", "handler": lambda ip: self.attacker.arp_spoof(ip, input(WHITE + "Enter gateway IP: " + RESET)), "needs_target": True, "destructive": True},
-            "9": {"desc": "DNS Poisoning", "handler": lambda ip: self.attacker.dns_poison(ip, input(WHITE + "Enter fake IP: " + RESET)), "needs_target": True, "destructive": True},
-            "10": {"desc": "SYN Flood", "handler": lambda ip: self.attacker.syn_flood(ip, int(input(WHITE + "Enter target port: " + RESET))), "needs_target": True, "destructive": True},
-            "11": {"desc": "Generate Report", "handler": lambda _: self.reporter.generate_report(), "needs_target": False},
-            "12": {"desc": "Spoof MAC", "handler": lambda _: self.spoof_mac(), "needs_target": False},
-            "13": {"desc": "Archive Old Reports", "handler": lambda _: self._archive_reports(), "needs_target": False},
-            "14": {"desc": "Clear All Reports", "handler": lambda _: self._clear_reports(), "needs_target": False, "destructive": True},
-            "15": {"desc": "Clear Archived Reports", "handler": lambda _: self._clear_archived_reports(), "needs_target": False, "destructive": True},
-            "16": {"desc": "Set Mode", "handler": lambda _: self._toggle_killer_mode(), "needs_target": False},
-            "17": {"desc": "Information Gathering", "handler": lambda _: self.information_gathering(), "needs_target": False},
-            "18": {"desc": "View Gathered Info", "handler": lambda _: self._show_gathered_info(), "needs_target": False},
-            "19": {"desc": "Reset Target", "handler": lambda _: self._reset_target(), "needs_target": False},
+            "1": {"desc": "Passive Recon", "handler": lambda ip: self._passive_recon(ip), "needs_target": True},
+            "2": {"desc": "Active Recon", "handler": lambda ip: self._active_recon(ip), "needs_target": True},
+            "3": {"desc": "Information Gathering", "handler": lambda _: self.information_gathering(), "needs_target": False},
+            "10": {"desc": "Quick Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "quick", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "11": {"desc": "Full Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "full", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "12": {"desc": "Vulnerability Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "vuln", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "13": {"desc": "Stealth Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "stealth", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "14": {"desc": "Multi-Target Scan", "handler": lambda _: self._handle_multi_target_scan(), "needs_target": False},
+            "20": {"desc": "Generate Payloads", "handler": lambda ip: self.payload_generator.generate_payloads(ip), "needs_target": True},
+            "21": {"desc": self._mode_payload_pack_label(), "handler": lambda ip: self.payload_generator.generate_mode_payloads(self.mode, ip), "needs_target": True},
+            "22": {"desc": self._mode_brute_label(), "handler": lambda ip: self.attacker.brute_force_overdrive(ip), "needs_target": True},
+            "23": {"desc": "SYN Flood", "handler": lambda ip: self.attacker.syn_flood(ip, int(input(WHITE + "Enter target port: " + RESET))), "needs_target": True, "destructive": True},
+            "24": {"desc": "MAC Spoofing", "handler": lambda _: self.spoof_mac(), "needs_target": False},
+            "25": {"desc": "ARP Spoofing", "handler": lambda ip: self.attacker.arp_spoof(ip, input(WHITE + "Enter gateway IP: " + RESET)), "needs_target": True, "destructive": True},
+            "26": {"desc": "DNS Poisoning", "handler": lambda ip: self.attacker.dns_poison(ip, input(WHITE + "Enter fake IP: " + RESET)), "needs_target": True, "destructive": True},
+            "30": {"desc": "Generate Report", "handler": lambda _: self.reporter.generate_report(), "needs_target": False},
+            "31": {"desc": "View Gathered Info", "handler": lambda _: self._show_gathered_info(), "needs_target": False},
+            "32": {"desc": "Archive Old Reports", "handler": lambda _: self._archive_reports(), "needs_target": False},
+            "33": {"desc": "Clear Reports", "handler": lambda _: self._clear_reports(), "needs_target": False, "destructive": True},
+            "34": {"desc": "Clear Archives", "handler": lambda _: self._clear_archived_reports(), "needs_target": False, "destructive": True},
+            "40": {"desc": "Set Mode", "handler": lambda _: self._toggle_killer_mode(), "needs_target": False},
+            "41": {"desc": "Reset Target", "handler": lambda _: self._reset_target(), "needs_target": False},
             "0": {"desc": "Exit", "handler": lambda _: self._exit(), "needs_target": False}
         }
 
-    def _killer_mode_options(self) -> Tuple[Dict[str, Dict[str, Any]], List[Tuple[str, List[Tuple[str, str]]]]]:
-        if self.mode != "KILLER":
-            return {}, []
-
-        def run_custom(label: str, args: str, prompt_target: bool = True, apply_mode: bool = False) -> Dict[str, Any]:
-            return {
-                "desc": label,
-                "handler": lambda ip: self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label=label, apply_mode_tuning=apply_mode),
-                "needs_target": prompt_target,
-            }
-
-        def udp_deep_handler(ip: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
-            if not ip:
-                return {}, []
-            full = self._confirm("Run full 65k UDP sweep? (high noise/slow) (y/n): ")
-            args = "-sU -T4 --max-retries 1 --min-rate 1000 " + ("-p-" if full else "--top-ports 500")
-            return self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label="UDP Deep Recon", apply_mode_tuning=False)
-
-        def decoy_handler(ip: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
-            if not ip:
-                return {}, []
-            try:
-                count = int(input(WHITE + "How many decoys? (5-20, default 10): " + RESET) or "10")
-            except ValueError:
-                count = 10
-            count = max(5, min(20, count))
-            args = f"-p- -A -T5 -D RND:{count}"
-            return self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label="Decoy Aggressive Scan", apply_mode_tuning=False)
-
-        def zombie_handler(ip: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
-            if not ip:
-                return {}, []
-            zombie = input(WHITE + "Enter zombie host IP (predictable IPID): " + RESET).strip()
-            if not zombie:
-                print(WHITE + "Zombie host required for idle scan." + RESET)
-                return {}, []
-            args = f"-sI {zombie}"
-            return self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label="Zombie Idle Scan", apply_mode_tuning=False)
-
-        def slowloris_handler(ip: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
-            if not ip:
-                return {}, []
-            args = "-p80,443 --script http-slowloris-check --max-retries 1 -T4"
-            return self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label="Slowloris Analysis Scan", apply_mode_tuning=False)
-
-        def iot_handler(ip: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
-            if not ip:
-                return {}, []
-            args = "-sV -p 80,1900,5683,1883,8883 --script upnp-info,mqtt-subscribe,mqtt-connect,coap-resources"
-            return self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label="IoT Fingerprint + Load Scan", apply_mode_tuning=False)
-
-        def hellfire_handler(ip: str) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
-            if not ip:
-                return {}, []
-            if not self._confirm("HELLFIRE will hammer the target. Continue? (y/n): "):
-                return {}, []
-            if not self._confirm("Last warning: authorized testing only. Proceed? (y/n): "):
-                return {}, []
-            args = "-p- -A -T5 -f -D RND:10 --script vuln,exploit,brute,malware"
-            return self.scanner.run_nmap_scan(ip, "custom", self.args.stealth, self.args.proxy, self.mode, custom_args=args, scan_label="HELLFIRE Scan", apply_mode_tuning=False)
-
-        actions: Dict[str, Dict[str, Any]] = {
-            "20": run_custom("Ultra-Aggressive Deep Scan", "-p- -A -T5 --script vuln,exploit,malware,auth,brute", apply_mode=False),
-            "21": {"desc": "UDP Deep Recon", "handler": udp_deep_handler, "needs_target": True},
-            "22": run_custom("Fragmented Evasion Scan", "-f", apply_mode=False),
-            "23": {"desc": "Decoy Aggressive Scan", "handler": decoy_handler, "needs_target": True},
-            "24": {"desc": "Zombie Idle Scan", "handler": zombie_handler, "needs_target": True},
-            "25": run_custom("ACK Firewall Analysis Scan", "-sA", apply_mode=False),
-            "26": run_custom("FIN Scan", "-sF", apply_mode=False),
-            "27": run_custom("NULL Scan", "-sN", apply_mode=False),
-            "28": run_custom("XMAS Scan", "-sX", apply_mode=False),
-            "29": {"desc": "Slowloris Analysis Scan", "handler": slowloris_handler, "needs_target": True},
-            "30": run_custom("RPC/DCOM Deep Enum", "--script=rpcinfo,dcom,nbstat,smb-enum-shares,smb-vuln*", apply_mode=False),
-            "31": run_custom("SSL/TLS Deep Audit Scan", "--script ssl* -p 443,8443,9443", apply_mode=False),
-            "32": {"desc": "IoT Fingerprint + Load Scan", "handler": iot_handler, "needs_target": True},
-            "33": {"desc": "HELLFIRE Scan", "handler": hellfire_handler, "needs_target": True, "destructive": True},
-        }
-
-        killer_section = [
-            ("KILLER MODE SCANS", [
-                ("20", "Ultra-Aggressive Deep Scan"),
-                ("21", "UDP Deep Recon"),
-                ("22", "Fragmented Evasion Scan"),
-                ("23", "Decoy Aggressive Scan"),
-                ("24", "Zombie Idle Scan"),
-                ("25", "ACK Firewall Analysis Scan"),
-                ("26", "FIN Scan"),
-                ("27", "NULL Scan"),
-                ("28", "XMAS Scan"),
-                ("29", "Slowloris Analysis Scan"),
-                ("30", "RPC/DCOM Deep Enum"),
-                ("31", "SSL/TLS Deep Audit Scan"),
-                ("32", "IoT Fingerprint + Load Scan"),
-                ("33", "HELLFIRE Scan"),
-            ])
-        ]
-
-        return actions, killer_section
+    def _mode_specific_options(self) -> Tuple[Dict[str, Dict[str, Any]], List[Tuple[str, List[Tuple[str, str]]]]]:
+        return {}, []
 
     def _base_sections(self) -> List[Tuple[str, List[Tuple[str, str]]]]:
+        payload_pack_label = self._mode_payload_pack_label()
+        brute_label = self._mode_brute_label()
         return [
-            ("SCANNING", [("01", "Quick Scan"), ("02", "Full Scan"), ("03", "Vulnerability Scan"), ("04", "Stealth Scan"), ("05", "Multi-Target Scan")]),
-            ("PAYLOADS & ATTACKS", [("06", "Generate Payloads"), ("07", "Brute Force Test"), ("10", "SYN Flood"), ("12", "Spoof MAC")]),
-            ("SPOOFING / MITM", [("08", "ARP Spoofing"), ("09", "DNS Poisoning")]),
-            ("REPORTING", [("11", "Generate Report"), ("13", "Archive Old Reports"), ("14", "Clear All Reports"), ("15", "Clear Archived Reports")]),
-            ("RECON", [("17", "Information Gathering")]),
-            ("SYSTEM", [("16", "Set Mode"), ("18", "View Gathered Info"), ("19", "Reset Target"), ("00", "Exit")]),
+            ("1 — RECONNAISSANCE", [("01", "Passive Recon"), ("02", "Active Recon"), ("03", "Information Gathering")]),
+            ("2 — SCANNING", [("10", "Quick Scan"), ("11", "Full Scan"), ("12", "Vulnerability Scan"), ("13", "Stealth Scan"), ("14", "Multi-Target Scan")]),
+            ("3 — EXPLOITATION & ATTACKS", [("20", "Generate Payloads"), ("21", payload_pack_label), ("22", brute_label), ("23", "SYN Flood"), ("24", "MAC Spoofing"), ("25", "ARP Spoofing"), ("26", "DNS Poisoning")]),
+            ("4 — REPORTING", [("30", "Generate Report"), ("31", "View Gathered Info"), ("32", "Archive Old Reports"), ("33", "Clear Reports"), ("34", "Clear Archives")]),
+            ("5 — CONFIGURATION / SYSTEM", [("40", "Set Mode"), ("41", "Reset Target"), ("00", "Exit")]),
         ]
 
     def _display_menu(self, sections: Optional[List[Tuple[str, List[Tuple[str, str]]]]] = None) -> None:
         mode = self.mode
         mode_color = MODE_COLORS.get(mode, WHITE)
-        colored_mode = mode_color + f"{mode}" + RESET
+        colored_mode = mode_color + f"{self._mode_label(mode)}" + RESET
         header = [
             "┌───────────────────────────────────────────────────────────┐",
             "│                   NETSPEAR NETWORK ANALYZER               │",
