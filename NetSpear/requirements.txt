@@ -12,3 +12,6 @@ pyyaml>=6.0
 selenium>=4.15.0
 boto3>=1.29.0
 psycopg2-binary>=2.9.0  # For PostgreSQL support
+# Dependency conflict resolutions
+h11>=0.16  # Required by httpcore 1.0.9
+certifi>=2024.8.30,<2025  # Required by indent 0.1.35

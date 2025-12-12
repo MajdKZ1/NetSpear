@@ -463,6 +463,9 @@ class ReportGenerator:
                             html_content += f"<tr><td>{port.get('port')}</td><td>{html.escape(port.get('protocol',''))}</td><td>{html.escape(port.get('service',''))}</td><td>{html.escape(port.get('version',''))}</td><td class='{state_class}'>{state}</td></tr>"
                     html_content += "</table>"
 
+                    vulns = scan.get("vulnerabilities", [])
+                    if vulns:
+                        html_content += "<h3 style='margin-top:14px;' id='vulnerabilities'>Vulnerabilities</h3><table><tr><th>CVE</th><th>Description</th><th>Port</th><th>Service</th><th>Risk</th></tr>"
                         for vuln in vulns:
                             sev = vuln.get("severity") or self._severity_from_text(vuln.get("description"))
                             score = self._risk_score_for_severity(sev)
@@ -474,6 +477,7 @@ class ReportGenerator:
                             score_str = str(score) if score is not None else '-'
                             
                             html_content += f"<tr><td class='vuln'>{self._safe_escape(cve)}</td><td>{self._safe_escape(description)}</td><td>{self._safe_escape(port)}</td><td>{self._safe_escape(service)}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {self._safe_escape(score_str)}</span></td></tr>"
+                        html_content += "</table>"
                     
                     suggestions = scan.get("suggestions", []) or []
                     if suggestions:
