@@ -47,6 +47,20 @@ from enhanced_recon import EnhancedReconnaissance
 from config_loader import ConfigLoader, create_default_config
 from structured_logging import setup_structured_logging, get_logger
 from plugin_system import PluginManager, ReconPlugin, ScanPlugin, ReportPlugin
+from database import init_database, get_db_manager
+from session_manager import SessionManager
+from credential_manager import CredentialManager
+from post_exploitation import PostExploitationFramework
+from workflow_engine import WorkflowEngine
+from vulnerability_scorer import VulnerabilityScorer
+from topology_mapper import TopologyMapper
+from evidence_collector import EvidenceCollector
+from cloud_enumeration import CloudEnumerator
+from scheduler import ScanScheduler
+from notifier import NotificationManager
+from wordlist_manager import WordlistManager
+from scanner_integration import ScannerIntegration
+from api import set_analyzer, run_api_server
 
 # Define NetSpear Purple options
 NETSPEAR_PURPLE_TRUECOLOR = "\033[38;2;122;6;205m"  # NetSpear Purple #7A06CD (RGB: 122, 6, 205)
@@ -102,6 +116,11 @@ class NetSpearNetworkAnalyzer:
         setup_structured_logging(log_level, log_format, log_file)
         self.logger = get_logger(__name__)
         
+        # Initialize database
+        db_url = os.getenv("NETSPEAR_DB_URL")
+        db_path = Path(os.getenv("NETSPEAR_DB_PATH")) if os.getenv("NETSPEAR_DB_PATH") else None
+        self.db_manager = init_database(db_url, db_path)
+        
         # Initialize components
         self.scanner = NetworkScanner()
         self.payload_generator = PayloadGenerator()
@@ -113,6 +132,25 @@ class NetSpearNetworkAnalyzer:
         self.advanced_mode = False
         self.current_target_info: Dict[str, Any] = {}
         self.enhanced_recon = EnhancedReconnaissance(self.tool_paths)
+        self.expanded_sections: Dict[str, bool] = {
+            "advanced": False,
+            "exploitation": False,
+            "reporting": False,
+        }
+        
+        # Initialize new feature modules
+        self.session_manager = SessionManager()
+        self.credential_manager = CredentialManager()
+        self.post_exploit = PostExploitationFramework(self.session_manager)
+        self.workflow_engine = WorkflowEngine(analyzer=self)
+        self.vuln_scorer = VulnerabilityScorer()
+        self.topology_mapper = TopologyMapper()
+        self.evidence_collector = EvidenceCollector()
+        self.cloud_enumerator = CloudEnumerator(self.tool_paths)
+        self.scan_scheduler = ScanScheduler(analyzer=self)
+        self.notifier = NotificationManager()
+        self.wordlist_manager = WordlistManager()
+        self.scanner_integration = ScannerIntegration()
         
         # Initialize plugin system
         self.plugin_manager = PluginManager()
@@ -120,7 +158,8 @@ class NetSpearNetworkAnalyzer:
             "scanner": self.scanner,
             "reporter": self.reporter,
             "tool_paths": self.tool_paths,
-            "config": self.config_loader.config
+            "config": self.config_loader.config,
+            "db": self.db_manager,
         })
         plugins_loaded = self.plugin_manager.load_plugins()
         if plugins_loaded > 0:
@@ -1087,9 +1126,23 @@ class NetSpearNetworkAnalyzer:
             options.update(mode_actions)
             sections = self._base_sections() + mode_sections
             self._display_menu(sections)
-            max_code = max(int(k) for k in options.keys())
-            choice = input(WHITE + f"\nEnter your choice (00-{max_code:02d}): " + RESET).strip()
+            # Calculate max code excluding expandable section codes
+            valid_codes = [int(k) for k in options.keys() if k not in ["3+", "4+", "5+"] and (k.isdigit() or k.lstrip("0").isdigit())]
+            max_code = max(valid_codes) if valid_codes else 62
+            choice = input(WHITE + f"\nEnter your choice (00-{max_code:02d}, or 3+/4+/5+ to expand sections): " + RESET).strip()
             normalized_choice = choice.lstrip("0") or "0"
+            
+            # Handle expandable/collapsible sections
+            if normalized_choice == "3+" or choice == "3+":
+                self.expanded_sections["exploitation"] = not self.expanded_sections.get("exploitation", False)
+                continue
+            elif normalized_choice == "4+" or choice == "4+":
+                self.expanded_sections["reporting"] = not self.expanded_sections.get("reporting", False)
+                continue
+            elif normalized_choice == "5+" or choice == "5+":
+                self.expanded_sections["advanced"] = not self.expanded_sections.get("advanced", False)
+                continue
+            
             action = options.get(normalized_choice)
             if not action:
                 print(WHITE + "Invalid choice." + RESET)
@@ -1150,6 +1203,19 @@ class NetSpearNetworkAnalyzer:
             "41": {"desc": "Reset Target", "handler": lambda _: self._reset_target(), "needs_target": False},
             "42": {"desc": "Plugin Management (BETA)", "handler": lambda _: self._plugin_management(), "needs_target": False},
             "43": {"desc": "Create Config File", "handler": lambda _: self._create_config(), "needs_target": False},
+            "50": {"desc": "Session Management", "handler": lambda _: self._session_management(), "needs_target": False},
+            "51": {"desc": "Credential Management", "handler": lambda _: self._credential_management(), "needs_target": False},
+            "52": {"desc": "Post-Exploitation", "handler": lambda _: self._post_exploitation_menu(), "needs_target": False},
+            "53": {"desc": "Workflow Automation", "handler": lambda _: self._workflow_menu(), "needs_target": False},
+            "54": {"desc": "Vulnerability Prioritization", "handler": lambda _: self._prioritize_vulnerabilities(), "needs_target": False},
+            "55": {"desc": "Network Topology", "handler": lambda _: self._topology_menu(), "needs_target": False},
+            "56": {"desc": "Evidence Collection", "handler": lambda _: self._evidence_menu(), "needs_target": False},
+            "57": {"desc": "Cloud Enumeration", "handler": lambda _: self._cloud_enum_menu(), "needs_target": False},
+            "58": {"desc": "Scan Scheduling", "handler": lambda _: self._scheduler_menu(), "needs_target": False},
+            "59": {"desc": "Notifications", "handler": lambda _: self._notification_menu(), "needs_target": False},
+            "60": {"desc": "Wordlist Management", "handler": lambda _: self._wordlist_menu(), "needs_target": False},
+            "61": {"desc": "Scanner Integration", "handler": lambda _: self._scanner_integration_menu(), "needs_target": False},
+            "62": {"desc": "Start API Server", "handler": lambda _: self._start_api_server(), "needs_target": False},
             "0": {"desc": "Exit", "handler": lambda _: self._exit(), "needs_target": False}
         }
 
@@ -1177,23 +1243,44 @@ class NetSpearNetworkAnalyzer:
                 ("20", "Generate Payloads"),
                 ("21", payload_pack_label),
                 ("22", brute_label),
-                ("23", "Network Stress Test"),
-                ("24", "MAC Address Spoofing"),
-                ("25", "ARP Cache Poisoning Test"),
-                ("26", "DNS Cache Poisoning Test")
-            ]),
+                ("3+", "▶ Show Advanced Exploitation" if not self.expanded_sections.get("exploitation") else "▼ Hide Advanced Exploitation"),
+            ] + ([
+                ("23", "Network Stress Test (BETA)"),
+                ("24", "MAC Address Spoofing (BETA)"),
+                ("25", "ARP Cache Poisoning Test (BETA)"),
+                ("26", "DNS Cache Poisoning Test (BETA)"),
+            ] if self.expanded_sections.get("exploitation") else [])),
             ("4 — REPORTING", [
                 ("30", "Generate Report"),
                 ("31", "View Gathered Intelligence"),
+                ("4+", "▶ Show Advanced Reporting" if not self.expanded_sections.get("reporting") else "▼ Hide Advanced Reporting"),
+            ] + ([
                 ("32", "Archive Old Reports"),
                 ("33", "Clear Reports"),
-                ("34", "Clear Archives")
-            ]),
+                ("34", "Clear Archives"),
+            ] if self.expanded_sections.get("reporting") else [])),
             ("5 — CONFIGURATION / SYSTEM", [
                 ("40", "Configure Scan Mode"),
                 ("41", "Reset Target"),
                 ("42", "Plugin Management (BETA)"),
                 ("43", "Create Config File"),
+                ("5+", "▶ Show Advanced Features (BETA)" if not self.expanded_sections.get("advanced") else "▼ Hide Advanced Features (BETA)"),
+            ] + ([
+                # Advanced Features (shown when expanded)
+                ("50", "Session Management (BETA)"),
+                ("51", "Credential Management (BETA)"),
+                ("52", "Post-Exploitation (BETA)"),
+                ("53", "Workflow Automation (BETA)"),
+                ("54", "Vulnerability Prioritization (BETA)"),
+                ("55", "Network Topology (BETA)"),
+                ("56", "Evidence Collection (BETA)"),
+                ("57", "Cloud Enumeration (BETA)"),
+                ("58", "Scan Scheduling (BETA)"),
+                ("59", "Notifications (BETA)"),
+                ("60", "Wordlist Management (BETA)"),
+                ("61", "Scanner Integration (BETA)"),
+                ("62", "Start API Server (BETA)"),
+            ] if self.expanded_sections.get("advanced") else []) + [
                 ("00", "Exit")
             ]),
         ]
@@ -1215,7 +1302,12 @@ class NetSpearNetworkAnalyzer:
         for title, items in sections:
             print(WHITE + f"\n[ {title} ]" + RESET)
             for code, label in items:
-                print(WHITE + f"  [{code}] {label}" + RESET)
+                if label:  # Filter out None/empty items (collapsed sections)
+                    # Highlight expandable sections
+                    if code.endswith("+"):
+                        print(NETSPEAR_PURPLE + f"  [{code}] {label}" + RESET)
+                    else:
+                        print(WHITE + f"  [{code}] {label}" + RESET)
         print(NETSPEAR_PURPLE + "\n" + self._menu_footer_text() + RESET)
 
     def _menu_footer_text(self) -> str:
@@ -1229,8 +1321,294 @@ class NetSpearNetworkAnalyzer:
         # Clear terminal for a clean, tool-like interface across platforms.
         os.system("cls" if os.name == "nt" else "clear")
 
+    def _session_management(self) -> None:
+        """Session management menu."""
+        print(WHITE + "\n=== Session Management ===" + RESET)
+        print(WHITE + "[1] List Active Sessions" + RESET)
+        print(WHITE + "[2] Create Session" + RESET)
+        print(WHITE + "[3] Execute Command" + RESET)
+        print(WHITE + "[4] Enumerate System" + RESET)
+        choice = input(WHITE + "Select option (1-4): " + RESET).strip()
+        
+        if choice == "1":
+            sessions = self.session_manager.get_active_sessions()
+            for session in sessions:
+                print(WHITE + f"  {session.session_uuid}: {session.session_type} on {session.target_ip} ({'active' if session.active else 'inactive'})" + RESET)
+        elif choice == "2":
+            target_ip = input(WHITE + "Target IP: " + RESET).strip()
+            session_type = input(WHITE + "Session type (meterpreter/shell/ssh): " + RESET).strip()
+            session = self.session_manager.create_session(session_type, target_ip)
+            if session:
+                print(WHITE + f"Created session: {session.session_uuid}" + RESET)
+        elif choice == "3":
+            session_uuid = input(WHITE + "Session UUID: " + RESET).strip()
+            command = input(WHITE + "Command: " + RESET).strip()
+            result = self.post_exploit.execute_command(session_uuid, command)
+            print(WHITE + f"Result: {result}" + RESET)
+        elif choice == "4":
+            session_uuid = input(WHITE + "Session UUID: " + RESET).strip()
+            enum = self.post_exploit.enumerate_system(session_uuid)
+            print(WHITE + f"Enumeration: {enum}" + RESET)
+    
+    def _credential_management(self) -> None:
+        """Credential management menu."""
+        print(WHITE + "\n=== Credential Management ===" + RESET)
+        print(WHITE + "[1] Add Credential" + RESET)
+        print(WHITE + "[2] List Credentials" + RESET)
+        print(WHITE + "[3] Find Credentials" + RESET)
+        print(WHITE + "[4] Export Credentials" + RESET)
+        choice = input(WHITE + "Select option (1-4): " + RESET).strip()
+        
+        if choice == "1":
+            target_ip = input(WHITE + "Target IP: " + RESET).strip()
+            service = input(WHITE + "Service (ssh/ftp/smb): " + RESET).strip()
+            username = input(WHITE + "Username: " + RESET).strip()
+            password = input(WHITE + "Password: " + RESET).strip()
+            cred = self.credential_manager.add_credential(target_ip, service, username, password)
+            if cred:
+                print(WHITE + f"Added credential: {cred.id}" + RESET)
+        elif choice == "2":
+            creds = self.credential_manager.find_credentials()
+            for cred in creds:
+                print(WHITE + f"  {cred['username']}@{cred['target_ip']}:{cred['service']} ({'verified' if cred['verified'] else 'unverified'})" + RESET)
+        elif choice == "3":
+            target_ip = input(WHITE + "Target IP (optional): " + RESET).strip() or None
+            service = input(WHITE + "Service (optional): " + RESET).strip() or None
+            creds = self.credential_manager.find_credentials(target_ip=target_ip, service=service)
+            for cred in creds:
+                print(WHITE + f"  {cred['username']}@{cred.get('target_ip', 'N/A')}:{cred['service']}" + RESET)
+        elif choice == "4":
+            format = input(WHITE + "Format (csv/json): " + RESET).strip() or "csv"
+            export = self.credential_manager.export_credentials(format)
+            print(WHITE + export[:500] + RESET)  # Show first 500 chars
+    
+    def _post_exploitation_menu(self) -> None:
+        """Post-exploitation menu."""
+        print(WHITE + "\n=== Post-Exploitation ===" + RESET)
+        session_uuid = input(WHITE + "Session UUID: " + RESET).strip()
+        print(WHITE + "[1] System Enumeration" + RESET)
+        print(WHITE + "[2] Privilege Escalation Check" + RESET)
+        print(WHITE + "[3] Establish Persistence" + RESET)
+        choice = input(WHITE + "Select option (1-3): " + RESET).strip()
+        
+        if choice == "1":
+            enum = self.post_exploit.enumerate_system(session_uuid)
+            print(WHITE + f"Enumeration complete. Check logs for details." + RESET)
+        elif choice == "2":
+            opps = self.post_exploit.check_privilege_escalation(session_uuid)
+            print(WHITE + f"Found {len(opps.get('opportunities', []))} opportunities" + RESET)
+        elif choice == "3":
+            method = input(WHITE + "Method (auto/service/cron): " + RESET).strip() or "auto"
+            result = self.post_exploit.establish_persistence(session_uuid, method)
+            print(WHITE + f"Persistence: {result.get('note', '')}" + RESET)
+    
+    def _workflow_menu(self) -> None:
+        """Workflow automation menu."""
+        print(WHITE + "\n=== Workflow Automation ===" + RESET)
+        print(WHITE + "[1] List Workflows" + RESET)
+        print(WHITE + "[2] Create Workflow" + RESET)
+        print(WHITE + "[3] Execute Workflow" + RESET)
+        choice = input(WHITE + "Select option (1-3): " + RESET).strip()
+        
+        if choice == "1":
+            workflows = self.workflow_engine.list_workflows()
+            for wf in workflows:
+                print(WHITE + f"  {wf.workflow_uuid}: {wf.name} ({'enabled' if wf.enabled else 'disabled'})" + RESET)
+        elif choice == "2":
+            name = input(WHITE + "Workflow name: " + RESET).strip()
+            desc = input(WHITE + "Description: " + RESET).strip()
+            print(WHITE + "Workflow creation requires JSON steps. Use API for advanced workflows." + RESET)
+        elif choice == "3":
+            workflow_uuid = input(WHITE + "Workflow UUID: " + RESET).strip()
+            target = input(WHITE + "Target (optional): " + RESET).strip() or None
+            execution = self.workflow_engine.execute_workflow(workflow_uuid, target)
+            if execution:
+                print(WHITE + f"Execution started: {execution.execution_uuid}" + RESET)
+    
+    def _prioritize_vulnerabilities(self) -> None:
+        """Prioritize vulnerabilities."""
+        target_ip = input(WHITE + "Target IP (optional, press Enter for all): " + RESET).strip() or None
+        count = self.vuln_scorer.batch_prioritize(target_ip)
+        print(WHITE + f"Prioritized {count} vulnerabilities" + RESET)
+        vulns = self.vuln_scorer.get_prioritized_vulnerabilities(target_ip=target_ip, limit=10)
+        for vuln in vulns:
+            print(WHITE + f"  CVE: {vuln.get('cve', 'N/A')}, Risk: {vuln.get('risk_score', 0):.2f}, Priority: {vuln.get('remediation_priority', 0)}" + RESET)
+    
+    def _topology_menu(self) -> None:
+        """Network topology menu."""
+        print(WHITE + "\n=== Network Topology ===" + RESET)
+        print(WHITE + "[1] Build Topology from Scans" + RESET)
+        print(WHITE + "[2] View Topology Graph" + RESET)
+        print(WHITE + "[3] Export Topology" + RESET)
+        choice = input(WHITE + "Select option (1-3): " + RESET).strip()
+        
+        if choice == "1":
+            topology = self.topology_mapper.build_topology_from_scans()
+            print(WHITE + f"Topology built: {topology['node_count']} nodes, {topology['edge_count']} edges" + RESET)
+        elif choice == "2":
+            target_ip = input(WHITE + "Root IP (optional): " + RESET).strip() or None
+            graph = self.topology_mapper.get_topology_graph(target_ip)
+            print(WHITE + f"Graph: {len(graph['nodes'])} nodes, {len(graph['edges'])} edges" + RESET)
+        elif choice == "3":
+            format = input(WHITE + "Format (json/dot/graphml): " + RESET).strip() or "json"
+            export = self.topology_mapper.export_topology(format)
+            print(WHITE + export[:500] + RESET)
+    
+    def _evidence_menu(self) -> None:
+        """Evidence collection menu."""
+        print(WHITE + "\n=== Evidence Collection ===" + RESET)
+        print(WHITE + "[1] List Evidence" + RESET)
+        print(WHITE + "[2] Capture Screenshot" + RESET)
+        choice = input(WHITE + "Select option (1-2): " + RESET).strip()
+        
+        if choice == "1":
+            evidence = self.evidence_collector.list_evidence()
+            for ev in evidence:
+                print(WHITE + f"  {ev.evidence_uuid}: {ev.evidence_type} - {ev.filename}" + RESET)
+        elif choice == "2":
+            url = input(WHITE + "URL: " + RESET).strip()
+            evidence = self.evidence_collector.capture_screenshot(url)
+            if evidence:
+                print(WHITE + f"Screenshot saved: {evidence.filename}" + RESET)
+    
+    def _cloud_enum_menu(self) -> None:
+        """Cloud enumeration menu."""
+        print(WHITE + "\n=== Cloud Enumeration ===" + RESET)
+        domain = input(WHITE + "Domain: " + RESET).strip()
+        print(WHITE + "[1] AWS" + RESET)
+        print(WHITE + "[2] GCP" + RESET)
+        print(WHITE + "[3] Azure" + RESET)
+        choice = input(WHITE + "Select platform (1-3): " + RESET).strip()
+        
+        if choice == "1":
+            results = self.cloud_enumerator.enumerate_aws(domain)
+            print(WHITE + f"AWS: {len(results.get('s3_buckets', []))} buckets found" + RESET)
+        elif choice == "2":
+            results = self.cloud_enumerator.enumerate_gcp(domain)
+            print(WHITE + f"GCP: {len(results.get('storage_buckets', []))} buckets found" + RESET)
+        elif choice == "3":
+            results = self.cloud_enumerator.enumerate_azure(domain)
+            print(WHITE + f"Azure: {len(results.get('storage_accounts', []))} accounts found" + RESET)
+    
+    def _scheduler_menu(self) -> None:
+        """Scan scheduling menu."""
+        print(WHITE + "\n=== Scan Scheduling ===" + RESET)
+        print(WHITE + "[1] List Scheduled Jobs" + RESET)
+        print(WHITE + "[2] Schedule Scan" + RESET)
+        choice = input(WHITE + "Select option (1-2): " + RESET).strip()
+        
+        if choice == "1":
+            jobs = self.scan_scheduler.list_jobs()
+            for job in jobs:
+                print(WHITE + f"  {job['job_id']}: {job['name']} (next: {job.get('next_run', 'N/A')})" + RESET)
+        elif choice == "2":
+            target_ip = input(WHITE + "Target IP: " + RESET).strip()
+            scan_type = input(WHITE + "Scan type (quick/full/vuln): " + RESET).strip() or "quick"
+            interval = input(WHITE + "Interval (minutes): " + RESET).strip()
+            try:
+                interval_min = int(interval)
+                job_id = self.scan_scheduler.schedule_scan(target_ip, scan_type, "interval", interval_minutes=interval_min)
+                if job_id:
+                    print(WHITE + f"Scheduled scan: {job_id}" + RESET)
+            except ValueError:
+                print(WHITE + "Invalid interval" + RESET)
+    
+    def _notification_menu(self) -> None:
+        """Notification menu."""
+        print(WHITE + "\n=== Notifications ===" + RESET)
+        print(WHITE + "Configure notification channels via environment variables:" + RESET)
+        print(WHITE + "  - SMTP_SERVER, SMTP_USER, SMTP_PASSWORD for email" + RESET)
+        print(WHITE + "  - SLACK_WEBHOOK_URL for Slack" + RESET)
+        print(WHITE + "  - TEAMS_WEBHOOK_URL for Teams" + RESET)
+    
+    def _wordlist_menu(self) -> None:
+        """Wordlist management menu."""
+        print(WHITE + "\n=== Wordlist Management ===" + RESET)
+        print(WHITE + "[1] List Wordlists" + RESET)
+        print(WHITE + "[2] Create Wordlist" + RESET)
+        choice = input(WHITE + "Select option (1-2): " + RESET).strip()
+        
+        if choice == "1":
+            wordlists = self.wordlist_manager.list_wordlists()
+            for wl in wordlists:
+                print(WHITE + f"  {wl['name']}: {wl.get('word_count', 0)} words" + RESET)
+        elif choice == "2":
+            name = input(WHITE + "Wordlist name: " + RESET).strip()
+            words_input = input(WHITE + "Words (comma-separated): " + RESET).strip()
+            words = [w.strip() for w in words_input.split(",")]
+            path = self.wordlist_manager.create_wordlist(name, words)
+            print(WHITE + f"Created wordlist: {path}" + RESET)
+    
+    def _scanner_integration_menu(self) -> None:
+        """Scanner integration menu."""
+        print(WHITE + "\n=== Scanner Integration ===" + RESET)
+        print(WHITE + "[1] Import Nessus" + RESET)
+        print(WHITE + "[2] Import OpenVAS" + RESET)
+        print(WHITE + "[3] Import Burp Suite" + RESET)
+        choice = input(WHITE + "Select scanner (1-3): " + RESET).strip()
+        
+        file_path = input(WHITE + "File path: " + RESET).strip()
+        target_ip = input(WHITE + "Target IP: " + RESET).strip()
+        
+        from pathlib import Path
+        if choice == "1":
+            count = self.scanner_integration.import_nessus(Path(file_path), target_ip)
+            print(WHITE + f"Imported {count} vulnerabilities" + RESET)
+        elif choice == "2":
+            count = self.scanner_integration.import_openvas(Path(file_path), target_ip)
+            print(WHITE + f"Imported {count} vulnerabilities" + RESET)
+        elif choice == "3":
+            count = self.scanner_integration.import_burp(Path(file_path), target_ip)
+            print(WHITE + f"Imported {count} vulnerabilities" + RESET)
+    
+    def _plugin_management(self) -> None:
+        """Plugin management menu."""
+        print(WHITE + "\n=== Plugin Management ===" + RESET)
+        plugins = self.plugin_manager.list_plugins()
+        if not plugins:
+            print(WHITE + "No plugins loaded." + RESET)
+            return
+        
+        print(WHITE + "Loaded plugins:" + RESET)
+        for i, plugin in enumerate(plugins, 1):
+            status = "enabled" if plugin.get("enabled") else "disabled"
+            print(WHITE + f"  [{i}] {plugin['name']} v{plugin['version']} - {status}" + RESET)
+            if plugin.get("description"):
+                print(WHITE + f"      {plugin['description']}" + RESET)
+    
+    def _create_config(self) -> None:
+        """Create default configuration file."""
+        try:
+            from config_loader import create_default_config
+            config_path = create_default_config()
+            if config_path:
+                print(WHITE + f"Created default configuration at: {config_path}" + RESET)
+            else:
+                print(WHITE + "Failed to create configuration file." + RESET)
+        except Exception as e:
+            print(WHITE + f"Error creating config: {e}" + RESET)
+    
+    def _start_api_server(self) -> None:
+        """Start REST API server."""
+        host = input(WHITE + "Host (default: 127.0.0.1): " + RESET).strip() or "127.0.0.1"
+        port = input(WHITE + "Port (default: 8000): " + RESET).strip() or "8000"
+        try:
+            port_num = int(port)
+            print(WHITE + f"Starting API server on {host}:{port_num}" + RESET)
+            print(WHITE + "Press Ctrl+C to stop" + RESET)
+            set_analyzer(self)
+            run_api_server(host=host, port=port_num, analyzer=self)
+        except ValueError:
+            print(WHITE + "Invalid port number" + RESET)
+        except KeyboardInterrupt:
+            print(WHITE + "\nAPI server stopped" + RESET)
+    
     def _exit(self) -> None:
         # Clear once on exit for a clean terminal.
+        if hasattr(self, 'scan_scheduler'):
+            self.scan_scheduler.shutdown()
+        if hasattr(self, 'db_manager'):
+            self.db_manager.close()
         self._clear_screen()
         exit_cleanly()
 
