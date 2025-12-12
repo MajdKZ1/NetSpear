@@ -16,7 +16,7 @@ from pathlib import Path
 from utils import WHITE, RESET, validate_ip, validate_url
 from error_handler import QuickError, safe_tool_check, safe_file_check
 from progress_tracker import MultiTaskProgressTracker, ProgressStage
-from config import MAX_WORKERS, DEFAULT_WORDLIST_PATH, ALTERNATIVE_WORDLISTS
+from config import MAX_WORKERS
 
 class EnhancedReconnaissance:
     """Enhanced reconnaissance with multiple tools and parallel processing."""

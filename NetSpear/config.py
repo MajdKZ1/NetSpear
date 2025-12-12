@@ -31,3 +31,19 @@ ARCHIVE_GRACE_SECONDS = 5  # Do not move/delete files modified in the last few s
 # Scan defaults.
 MAX_SCAN_TIMEOUT = 300
 MAX_WORKERS = max(1, os.cpu_count() * 2 if os.cpu_count() else 4)
+
+# Wordlist defaults for directory enumeration
+DEFAULT_WORDLIST_PATH = os.getenv(
+    "GOBUSTER_WORDLIST",
+    "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt"
+)
+
+ALTERNATIVE_WORDLISTS = [
+    "/usr/share/seclists/Discovery/Web-Content/common.txt",
+    "/usr/share/wordlists/dirb/common.txt",
+    "/usr/share/wordlists/dirbuster/directory-list-2.3-small.txt",
+    "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt",
+    "/usr/share/wordlists/dirbuster/directory-list-2.3-big.txt",
+    "/usr/share/seclists/Discovery/Web-Content/big.txt",
+    "/usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt",
+]
