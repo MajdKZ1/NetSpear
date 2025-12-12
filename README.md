@@ -124,7 +124,7 @@ WAPPALYZER_PATH, FEROXBUSTER_PATH, WAFW00F_PATH, SQLMAP_PATH, SPIDERFOOT_PATH
 
 ---
 
-## Installation
+## Installation & Updates
 
 ### Fast Install Script (macOS/Linux/Windows)
 
@@ -142,6 +142,39 @@ chmod +x install.sh
 2. Run from anywhere:
 ```bash
 netspear
+```
+
+### Updating NetSpear
+
+NetSpear includes an automated update script that fetches the latest version from the GitHub repository.
+
+**Quick Update:**
+```bash
+cd NetSpear
+chmod +x update.sh
+./update.sh
+```
+
+The update script will:
+- Check for prerequisites (Git)
+- Verify repository connection
+- Backup any uncommitted changes
+- Fetch latest updates from the repository
+- Show what changes will be applied
+- Update Python dependencies
+- Verify the installation
+
+**Features:**
+- Automatic backup of uncommitted changes
+- Safe update process with confirmation prompts
+- Dependency updates included
+- Works with both fresh installations and existing clones
+
+**Manual Update (Git):**
+```bash
+cd NetSpear
+git pull origin main
+pip install -r NetSpear/requirements.txt
 ```
 
 ### Manual Installation
@@ -169,6 +202,23 @@ Use your system's package manager:
 - **Debian/Ubuntu**: `sudo apt install nmap metasploit-framework hydra`
 - **macOS**: `brew install nmap`
 - **Arch Linux**: `sudo pacman -S nmap`
+
+### Keeping NetSpear Updated
+
+NetSpear is actively developed and receives regular updates. Always use the update script to get the latest features and security improvements.
+
+**Update Script:**
+```bash
+./update.sh
+```
+
+The script handles everything automatically including:
+- Fetching latest code from the repository
+- Preserving your local changes (with backup)
+- Updating Python dependencies
+- Verifying the installation
+
+**Repository:** https://github.com/MajdKZ1/NetSpear.git
 
 ---
 
@@ -458,6 +508,8 @@ NetSpear/
 ├── utils.py                   # Helper functions
 ├── config.py                  # Tool paths and defaults
 ├── requirements.txt           # Python dependencies
+├── update.sh                  # Update script for latest version
+├── install.sh                 # Installation script
 ├── plugins/                   # Plugin directory
 ├── Reports/                   # Generated reports
 └── templates/                 # Report templates
