@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NetSpear Network Analysis Report</title>
+    <style>
+        :root {
+            --bg: #0b1221;
+            --card: #111a2f;
+            --text: #e8f0ff;
+            --accent: #7a06cd;
+            --muted: #8fa2c2;
+            --danger: #f25f5c;
+            --border: #1f2a44;
+            --success: #2ecc71;
+            --sev-high: #ff4d4f;
+            --sev-medium: #f1c40f;
+            --sev-info: #a259ff;
+            --sev-unknown: #9aa5b1;
+        }
+        * { box-sizing: border-box; }
+        body { 
+            background: radial-gradient(circle at 20% 20%, rgba(122,6,205,0.08), transparent 25%), 
+                        radial-gradient(circle at 80% 10%, rgba(242,95,92,0.08), transparent 25%), 
+                        var(--bg); 
+            color: var(--text); 
+            font-family: 'Inter', 'SF Pro Display', 'Segoe UI', sans-serif; 
+            margin: 0; 
+            padding: 32px; 
+        }
+        h1, h2, h3 { color: var(--text); margin-bottom: 8px; }
+        h1 { letter-spacing: 0.8px; }
+        p { color: var(--muted); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+        .card { 
+            background: linear-gradient(145deg, rgba(255,255,255,0.02), rgba(255,255,255,0)); 
+            border: 1px solid var(--border); 
+            border-radius: 14px; 
+            padding: 16px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35); 
+        }
+        .pill { 
+            display: inline-block; 
+            padding: 4px 10px; 
+            border-radius: 999px; 
+            font-size: 12px; 
+            letter-spacing: 0.4px; 
+            background: rgba(122,6,205,0.1); 
+            color: var(--accent); 
+            border: 1px solid rgba(122,6,205,0.3); 
+        }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-size: 12px; }
+        tr:last-child td { border-bottom: none; }
+        .muted { color: var(--muted); }
+        .badge-open { color: var(--success); font-weight: 600; }
+        .badge-closed { color: var(--muted); }
+        .badge-filtered { color: var(--accent); }
+        .vuln { color: var(--danger); font-weight: 600; }
+        .sev { 
+            display: inline-block; 
+            padding: 4px 8px; 
+            border-radius: 999px; 
+            font-size: 12px; 
+            margin-left: 6px; 
+            border: 1px solid transparent; 
+        }
+        .sev-high, .sev-critical { 
+            background: rgba(255,77,79,0.16); 
+            color: var(--sev-high); 
+            border-color: rgba(255,77,79,0.35); 
+        }
+        .sev-medium { 
+            background: rgba(241,196,15,0.16); 
+            color: var(--sev-medium); 
+            border-color: rgba(241,196,15,0.45); 
+        }
+        .sev-info, .sev-interesting { 
+            background: rgba(162,89,255,0.16); 
+            color: var(--sev-info); 
+            border-color: rgba(162,89,255,0.45); 
+        }
+        .sev-unknown { 
+            background: rgba(154,165,177,0.12); 
+            color: var(--sev-unknown); 
+            border-color: rgba(154,165,177,0.4); 
+        }
+        details.log { margin-top: 6px; }
+        details.log summary { cursor: pointer; color: var(--muted); }
+        details.log summary::marker { content: ''; }
+        details.log summary span { color: var(--accent); }
+        .footer-bar { 
+            display:flex; 
+            justify-content: space-between; 
+            align-items:center; 
+            margin-top:24px; 
+            color: var(--muted); 
+            font-size:12px; 
+            flex-wrap: wrap; 
+            gap: 8px; 
+        }
+        .actions { 
+            display:flex; 
+            gap:10px; 
+            margin: 12px 0 20px 0; 
+            flex-wrap: wrap; 
+        }
+        .btn { 
+            border: 1px solid var(--accent); 
+            background: rgba(122,6,205,0.12); 
+            color: var(--accent); 
+            padding: 8px 14px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: 600; 
+            letter-spacing: 0.3px; 
+        }
+        .btn:hover { filter: brightness(1.1); }
+        .hero { 
+            border: 1px dashed var(--accent); 
+            border-radius: 12px; 
+            padding: 14px; 
+            margin-bottom: 12px; 
+            color: var(--muted); 
+            text-align:left; 
+            background: rgba(122,6,205,0.04); 
+            display: inline-block; 
+        }
+        .hero img { 
+            max-width: 360px; 
+            width: 100%; 
+            height: auto; 
+            display: block; 
+            margin: 0; 
+            border-radius: 8px; 
+        }
+        @media print {
+            body { background: #ffffff !important; color: #000000 !important; }
+            .actions { display: none !important; }
+            .card { background: #ffffff; border-color: #444; }
+        }
+    </style>
+</head>
+<body>
+    {% if banner_src %}
+    <div class="hero"><img src="{{ banner_src }}" alt="NetSpear Banner"></div>
+    {% endif %}
+    <h1>NetSpear Network Analysis Report</h1>
+    <p class="muted">{{ summary.unique_targets }} unique target(s) • Built by OpenNET LLC (All rights reserved)</p>
+    
+    <div class="actions">
+        <button class="btn" id="btn-pdf">Export PDF</button>
+        <button class="btn" id="btn-json">Download JSON</button>
+    </div>
+    
+    <script id="report-data" type="application/json">{{ report_data_json|safe }}</script>
+    
+    <div class="card" style="margin-top:12px;" id="summary">
+        <h2>Summary</h2>
+        <p class="muted">A NetSpear analysis was conducted against {{ summary.unique_targets }} unique target(s), assessing open ports, service exposure, web-layer anomalies, and vulnerability signatures.</p>
+        
+        <div class="card" style="margin-top:10px; background: rgba(255,255,255,0.03);">
+            <h3>Exposure Overview</h3>
+            <ul class="muted" style="padding-left: 18px; line-height: 1.5;">
+                <li>{{ summary.open_ports }} open port(s) identified</li>
+                <li>{{ summary.total_vulnerabilities }} confirmed vulnerabilities</li>
+                <li>{{ summary.web_enum_anomalies }} web enumeration anomalies detected</li>
+                <li>{{ summary.recon_profiles }} recon profiles captured</li>
+                <li>{{ summary.critical_findings }} critical/high-severity indicators</li>
+            </ul>
+        </div>
+        
+        <div class="card" style="margin-top:10px; background: rgba(122,6,205,0.08); border-color: rgba(122,6,205,0.3);">
+            <h3>Security Score: {{ summary.security_score }} / 100 ({{ summary.exposure }})</h3>
+            <p class="muted" style="margin:4px 0;">Attack Surface: {{ 'Minimal' if summary.security_score >= 85 else 'Moderate' if summary.security_score >= 60 else 'High' }}</p>
+            <p class="muted" style="margin:4px 0;">Confirmed Vulnerabilities: {{ summary.total_vulnerabilities }}</p>
+            <p class="muted" style="margin:4px 0;">Anomalies Detected: {{ summary.anomalies_label }}</p>
+            <p class="muted" style="margin:4px 0;">Critical Issues: {{ 'None' if summary.critical_findings == 0 else summary.critical_findings }}</p>
+        </div>
+    </div>
+    
+    <div class="grid" id="technical">
+        <div class="card"><h3>Scans</h3><p class="pill">{{ summary.total_scans }} recorded</p></div>
+        <div class="card"><h3>Open Ports</h3><p class="pill">{{ summary.open_ports }} detected</p></div>
+        <div class="card"><h3>Vulnerabilities</h3><p class="pill" style="background: rgba(242,95,92,0.12); color: var(--danger); border-color: rgba(242,95,92,0.3);">{{ summary.total_vulnerabilities }} flagged</p></div>
+        <div class="card"><h3>Recon Profiles</h3><p class="pill">{{ summary.recon_profiles }} captured</p></div>
+    </div>
+    
+    {% for scan in scans %}
+    <div class="card" style="margin-top:16px;">
+        <div style="display:flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <div>
+                <h2>{{ scan.target }}</h2>
+                <p class="muted">{{ scan.label }} • {{ scan.timestamp }}</p>
+            </div>
+            <span class="pill">{{ scan.host_state|upper }}</span>
+        </div>
+        
+        <table>
+            <tr><th>Port</th><th>Protocol</th><th>Service</th><th>Version</th><th>Status</th></tr>
+            {% for port in scan.ports %}
+            <tr>
+                <td>{{ port.port }}</td>
+                <td>{{ port.protocol }}</td>
+                <td>{{ port.service }}</td>
+                <td>{{ port.version }}</td>
+                <td class="{% if port.state == 'open' %}badge-open{% elif port.state == 'filtered' %}badge-filtered{% else %}badge-closed{% endif %}">{{ port.state }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        
+        {% if scan.vulnerabilities %}
+        <h3 style="margin-top:14px;">Vulnerabilities</h3>
+        <table>
+            <tr><th>CVE</th><th>Description</th><th>Port</th><th>Service</th><th>Risk</th></tr>
+            {% for vuln in scan.vulnerabilities %}
+            <tr>
+                <td class="vuln">{{ vuln.cve|default('Unknown') }}</td>
+                <td>{{ vuln.description|default('No description') }}</td>
+                <td>{{ vuln.port }}</td>
+                <td>{{ vuln.service }}</td>
+                <td><span class="sev sev-{{ vuln.severity|default('unknown') }}">{{ vuln.severity|default('unknown')|title }}</span></td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+    </div>
+    {% endfor %}
+    
+    <div class="footer-bar">
+        <div>Report id: {{ timestamp }} • Saved to {{ filepath }}</div>
+        <div>© 2025 OpenNET LLC • NetSpear v2.0</div>
+    </div>
+    
+    <script>
+        (function() {
+            const pdfBtn = document.getElementById('btn-pdf');
+            const jsonBtn = document.getElementById('btn-json');
+            const dataEl = document.getElementById('report-data');
+            const payload = dataEl ? dataEl.textContent : null;
+            
+            if (pdfBtn) {
+                pdfBtn.addEventListener('click', () => window.print());
+            }
+            
+            if (jsonBtn && payload) {
+                jsonBtn.addEventListener('click', () => {
+                    try {
+                        const blob = new Blob([payload], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = '{{ filename|replace(".html", "") }}.json';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    } catch (e) {
+                        console.error('Failed to export JSON', e);
+                    }
+                });
+            }
+        })();
+    </script>
+</body>
+</html>
+

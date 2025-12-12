@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+NetSpear Network Analyzer - Main Entry Point
+
+A comprehensive network security assessment framework for authorized penetration testing.
+Built by OpenNET LLC.
+"""
 import argparse
 import random
 import subprocess
@@ -12,13 +18,12 @@ import socket
 import json
 import shutil
 import ipaddress
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
-from typing import Any
+from typing import Any, Optional, List, Dict, Tuple
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
 
 # Allow running the script from any working directory by forcing cwd to the file's directory.
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -27,12 +32,21 @@ if Path.cwd() != PROJECT_ROOT:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import DEFAULT_TOOL_PATHS
-from utils import WHITE, RESET, setup_logging, exit_cleanly, check_privileges, detect_primary_interface, validate_ip
+from utils import (
+    WHITE, RESET, setup_logging, exit_cleanly, check_privileges, 
+    detect_primary_interface, validate_ip, validate_port, validate_url, validate_file_path
+)
+from error_handler import QuickError, safe_file_check, safe_tool_check
+from progress_tracker import ProgressTracker, ProgressStage
 from network_scanning import NetworkScanner
 from payloads import PayloadGenerator
 from attacks import NetworkAttacker
 from reporting import ReportGenerator
 from exploits import ExploitRunner
+from enhanced_recon import EnhancedReconnaissance
+from config_loader import ConfigLoader, create_default_config
+from structured_logging import setup_structured_logging, get_logger
+from plugin_system import PluginManager, ReconPlugin, ScanPlugin, ReportPlugin
 
 # Define NetSpear Purple options
 NETSPEAR_PURPLE_TRUECOLOR = "\033[38;2;122;6;205m"  # NetSpear Purple #7A06CD (RGB: 122, 6, 205)
@@ -45,31 +59,73 @@ MODE_COLORS = {
     "SAFE": "\033[92m",
     "STEALTH": "\033[96m",
     "AGGRESSIVE": "\033[93m",
-    "INSANE": "\033[95m",
-    "KILLER": "\033[91m",
+    "INTENSIVE": "\033[95m",
+    "COMPREHENSIVE": "\033[91m",
 }
 
 MODE_LABELS = {
     "SAFE": "Safe Scan",
     "STEALTH": "Stealth Scan",
     "AGGRESSIVE": "Standard Scan",
-    "INSANE": "Fast Scan",
-    "KILLER": "Full Scan",
+    "INTENSIVE": "Intensive Scan",
+    "COMPREHENSIVE": "Comprehensive Scan",
 }
 
 class NetSpearNetworkAnalyzer:
+    """
+    Main NetSpear Network Analyzer class.
+    
+    Provides an interactive CLI for network reconnaissance, scanning, exploitation,
+    and reporting. Integrates multiple security tools including Nmap, Metasploit,
+    Hydra, and various web enumeration tools.
+    
+    Attributes:
+        scanner: NetworkScanner instance for port and service scanning
+        payload_generator: PayloadGenerator instance for creating payloads
+        attacker: NetworkAttacker instance for network attacks
+        reporter: ReportGenerator instance for creating reports
+        exploit_runner: ExploitRunner instance for vulnerability exploitation
+        mode: Current operation mode (SAFE, STEALTH, AGGRESSIVE, INTENSIVE, COMPREHENSIVE)
+        current_target_info: Dictionary storing current target information
+    """
+    
     def __init__(self):
-        setup_logging()
+        # Load configuration
+        self.config_loader = ConfigLoader()
+        self.tool_paths = self.config_loader.get_tool_paths()
+        
+        # Setup structured logging
+        log_config = self.config_loader.get("logging", {})
+        log_level = getattr(logging, log_config.get("level", "INFO").upper(), logging.INFO)
+        log_format = log_config.get("format", "text")
+        log_file = Path(log_config.get("file")) if log_config.get("file") else None
+        setup_structured_logging(log_level, log_format, log_file)
+        self.logger = get_logger(__name__)
+        
+        # Initialize components
         self.scanner = NetworkScanner()
         self.payload_generator = PayloadGenerator()
         self.attacker = NetworkAttacker()
-        self.reporter = ReportGenerator()
+        self.reporter = ReportGenerator(base_dir=self.config_loader.get_reports_dir())
         self.exploit_runner = ExploitRunner()
         self.args = self._parse_args()
-        self.tool_paths = DEFAULT_TOOL_PATHS.copy()
-        self.mode = "SAFE"
-        self.killer_mode = False
+        self.mode = self.config_loader.get("scan_defaults", {}).get("mode", "SAFE")
+        self.advanced_mode = False
         self.current_target_info: Dict[str, Any] = {}
+        self.enhanced_recon = EnhancedReconnaissance(self.tool_paths)
+        
+        # Initialize plugin system
+        self.plugin_manager = PluginManager()
+        self.plugin_manager.set_context({
+            "scanner": self.scanner,
+            "reporter": self.reporter,
+            "tool_paths": self.tool_paths,
+            "config": self.config_loader.config
+        })
+        plugins_loaded = self.plugin_manager.load_plugins()
+        if plugins_loaded > 0:
+            self.logger.info(f"Loaded {plugins_loaded} plugin(s)")
+        
         self._clear_screen()
 
     def _mode_label(self, mode: Optional[str] = None) -> str:
@@ -82,26 +138,26 @@ class NetSpearNetworkAnalyzer:
             "SAFE": "Generate Payload Pack (Safe payloads)",
             "STEALTH": "Generate Payload Pack (Stealthy payloads)",
             "AGGRESSIVE": "Generate Payload Pack (Standard payloads)",
-            "INSANE": "Generate Payload Pack (Fast payloads)",
-            "KILLER": "Generate Payload Pack (Full payloads)",
+            "INTENSIVE": "Generate Payload Pack (Intensive payloads)",
+            "COMPREHENSIVE": "Generate Payload Pack (Comprehensive payloads)",
         }
         return variants.get(mode, "Generate Payload Pack")
 
     def _mode_brute_label(self) -> str:
         mode = (self.mode or "").upper()
         variants = {
-            "SAFE": "Brute Force Test (safe timing)",
-            "STEALTH": "Brute Force Test (stealth timing)",
-            "AGGRESSIVE": "Brute Force Test (standard timing)",
-            "INSANE": "Brute Force Test (fast timing)",
-            "KILLER": "Brute Force Test (full throttle)",
+            "SAFE": "Credential Testing (safe timing)",
+            "STEALTH": "Credential Testing (stealth timing)",
+            "AGGRESSIVE": "Credential Testing (standard timing)",
+            "INTENSIVE": "Credential Testing (intensive timing)",
+            "COMPREHENSIVE": "Credential Testing (comprehensive timing)",
         }
-        return variants.get(mode, "Brute Force Test")
+        return variants.get(mode, "Credential Testing")
 
     def _cache_target_minimal(self, ip: Optional[str], label: str) -> None:
         if not ip:
             return
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         self.current_target_info = {
             "ip": ip,
             "label": label,
@@ -127,8 +183,8 @@ class NetSpearNetworkAnalyzer:
             print(WHITE + f"Unknown mode '{mode}'. Keeping current mode: {self.mode}." + RESET)
             return
         self.mode = mode
-        # Aggressive tiers unlock killer-style suggestions.
-        self.killer_mode = mode in {"KILLER", "INSANE", "AGGRESSIVE"}
+        # Advanced tiers unlock comprehensive suggestions.
+        self.advanced_mode = mode in {"COMPREHENSIVE", "INTENSIVE", "AGGRESSIVE"}
         color = MODE_COLORS.get(mode, WHITE)
         print(color + f"[+] Mode set to {self._mode_label(mode)}" + RESET)
         if self.current_target_info:
@@ -148,8 +204,8 @@ class NetSpearNetworkAnalyzer:
             "open_ports": len(open_ports),
             "vulns": len(vulns or []),
             "web_anomalies": web_anoms,
-            "last_action": datetime.utcnow().isoformat() + "Z",
-            "last_scan": (scan_result or {}).get("timestamp") or datetime.utcnow().isoformat() + "Z",
+            "last_action": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            "last_scan": (scan_result or {}).get("timestamp") or datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         }
 
     def _prompt_target(self, default_ip: Optional[str]) -> Optional[str]:
@@ -202,7 +258,11 @@ class NetSpearNetworkAnalyzer:
             self._print_suggestions(suggestions)
 
     def _confirm(self, message: str) -> bool:
-        return input(WHITE + message + RESET).strip().lower() == "y"
+        """Prompt user for confirmation with proper output flushing."""
+        sys.stdout.flush()  # Ensure previous output is displayed
+        response = input(WHITE + message + RESET).strip().lower()
+        sys.stdout.flush()  # Ensure response is processed
+        return response == "y"
 
     def _build_suggestions(self, scan_result: Dict[str, str], vulnerabilities: List[Dict[str, str]]) -> List[str]:
         ports = scan_result.get("ports", [])
@@ -218,8 +278,8 @@ class NetSpearNetworkAnalyzer:
             if num in {80, 443} or service in {"http", "https"}:
                 suggestions.append("Web (80/443) open: enumerate dirs (gobuster/feroxbuster), fingerprint tech (whatweb/wappalyzer), hunt SQLi/XSS/RCE, check admin panels.")
                 suggestions.append("Web app review: session flags (HttpOnly/Secure/SameSite), auth flows/MFA, TLS config/ciphers, outdated components, access controls/request filtering.")
-                if self.killer_mode:
-                    suggestions.append("Killer: run nmap --script vuln/nikto, probe uploads for webshell, brute weak HTTP auth, try default creds on common panels.")
+                if self.advanced_mode:
+                    suggestions.append("Advanced: run nmap --script vuln/nikto, probe uploads for webshell, test weak HTTP auth, try default creds on common panels.")
             if num == 22 or service == "ssh":
                 suggestions.append("SSH open: check weak creds and banner versions; brute with hydra if allowed; enumerate authorized_keys if filesystem access found.")
             if num == 21 or service == "ftp":
@@ -252,7 +312,7 @@ class NetSpearNetworkAnalyzer:
                 suggestions.append("Elasticsearch open: test for unauthenticated access; run _cat APIs; check for RCE CVEs on old versions.")
             if num in {27017, 27018} or "mongo" in service:
                 suggestions.append("MongoDB open: check for unauthenticated access; dump dbs; look for exposed credentials.")
-        if vulnerabilities and self.killer_mode:
+        if vulnerabilities and self.advanced_mode:
             suggestions.append("Vuln scan flagged issues—chain with Metasploit modules suggested above for rapid exploitation.")
         return suggestions
 
@@ -309,8 +369,12 @@ class NetSpearNetworkAnalyzer:
                         "proxy": data.get("proxy"),
                         "hosting": data.get("hosting"),
                     }
-        except Exception as exc:  # noqa: BLE001
+        except (URLError, HTTPError) as exc:
             logging.debug("Geo lookup failed for %s: %s", ip, exc)
+        except TimeoutError as exc:
+            logging.debug("Geo lookup timeout for %s: %s", ip, exc)
+        except Exception as exc:
+            logging.warning("Unexpected error during geo lookup: %s", exc)
         return {}
 
     def _http_fingerprint(self, url: Optional[str]) -> Dict[str, str]:
@@ -328,34 +392,171 @@ class NetSpearNetworkAnalyzer:
                     "powered_by": headers.get("X-Powered-By"),
                     "content_type": headers.get("Content-Type"),
                 }
-        except Exception as exc:  # noqa: BLE001
+        except (URLError, HTTPError) as exc:
             logging.debug("HTTP fingerprint failed for %s: %s", url, exc)
+            return {"url": url, "error": str(exc)}
+        except TimeoutError as exc:
+            logging.debug("HTTP fingerprint timeout for %s: %s", url, exc)
+            return {"url": url, "error": f"Timeout: {exc}"}
+        except Exception as exc:
+            logging.warning("Unexpected error during HTTP fingerprint: %s", exc)
             return {"url": url, "error": str(exc)}
 
     def _passive_recon(self, ip: Optional[str]) -> None:
+        """Perform passive reconnaissance using OSINT sources."""
         if not ip:
-            print(WHITE + "No target provided for passive recon." + RESET)
+            print(QuickError.invalid_input("target", "No target provided"))
             return
         if not validate_ip(ip):
             return
-        geo = self._geo_lookup(ip)
-        http_info = self._http_fingerprint(f"http://{ip}")
+        
+        print(WHITE + "Starting passive reconnaissance (OSINT)..." + RESET)
+        recon_data = self.enhanced_recon.passive_recon_parallel(ip, "ip")
+        
+        # Execute recon plugins
+        recon_plugins = self.plugin_manager.get_plugins_by_type(ReconPlugin)
+        for plugin in recon_plugins:
+            try:
+                plugin_data = plugin.gather_intel(ip, "ip")
+                if plugin_data:
+                    recon_data[f"plugin_{plugin.name}"] = plugin_data
+            except Exception as e:
+                self.logger.error(f"Plugin {plugin.name} failed: {e}")
+        
         recon_entry = {
             "input": ip,
             "target": ip,
             "resolved_ip": ip,
             "type": "ip",
-            "geo": geo,
-            "http": http_info,
+            "geo": recon_data.get("geoip", {}),
+            "dns": recon_data.get("dns", {}),
+            "whois": recon_data.get("whois", {}),
+            "shodan": recon_data.get("shodan", {}),
+            "http": recon_data.get("http", {}),
             "scan": {},
             "vulnerabilities": [],
             "suggestions": [],
             "web_enum": {},
-            "osint": {},
+            "osint": {
+                "subdomains": recon_data.get("subdomains", []),
+                "certificates": recon_data.get("certificates", {}),
+                "errors": recon_data.get("errors", [])
+            },
         }
         self.reporter.add_recon(recon_entry)
-        self._cache_target_minimal(ip, "Passive Recon")
-        print(WHITE + f"Passive recon cached for {ip}. Geo/IP details added to report." + RESET)
+        self._cache_target_minimal(ip, "Passive Reconnaissance")
+        print(WHITE + f"✓ Passive reconnaissance completed for {ip}" + RESET)
+        if recon_data.get("errors"):
+            print(WHITE + f"  Note: {len(recon_data['errors'])} tool(s) unavailable or failed" + RESET)
+        
+        # Display quick summary
+        if recon_data.get("geoip"):
+            geo = recon_data["geoip"]
+            if geo.get("country"):
+                print(WHITE + f"  Location: {geo.get('city', '')}, {geo.get('country', '')}" + RESET)
+        if recon_data.get("subdomains"):
+            print(WHITE + f"  Subdomains found: {len(recon_data['subdomains'])}" + RESET)
+    
+    def _enhanced_osint_recon(self) -> None:
+        """Perform comprehensive OSINT reconnaissance on a domain or IP."""
+        print(WHITE + "\n=== OSINT Intelligence Gathering ===" + RESET)
+        print(WHITE + "[1] IP Address" + RESET)
+        print(WHITE + "[2] Domain Name" + RESET)
+        print(WHITE + "[3] URL/Website" + RESET)
+        choice = input(WHITE + "Select target type (1-3): " + RESET).strip()
+        
+        target_type_map = {"1": ("ip", "IP Address"), "2": ("domain", "Domain Name"), "3": ("url", "URL/Website")}
+        if choice not in target_type_map:
+            print(QuickError.invalid_input("target type", "Choose 1, 2, or 3"))
+            return
+        
+        recon_type, type_label = target_type_map[choice]
+        target = input(WHITE + f"Enter {type_label}: " + RESET).strip()
+        
+        if not target:
+            print(QuickError.invalid_input("target", "Target cannot be empty"))
+            return
+        
+        if recon_type == "ip" and not validate_ip(target):
+            return
+        
+        print(WHITE + f"\nStarting OSINT intelligence gathering on {target}..." + RESET)
+        recon_data = self.enhanced_recon.passive_recon_parallel(target, recon_type)
+        
+        # Display results
+        print(WHITE + "\n=== Reconnaissance Results ===" + RESET)
+        
+        if recon_data.get("geoip"):
+            geo = recon_data["geoip"]
+            print(WHITE + "\n[GeoIP Information]" + RESET)
+            if geo.get("country"):
+                print(WHITE + f"  Country: {geo.get('country')}" + RESET)
+            if geo.get("city"):
+                print(WHITE + f"  City: {geo.get('city')}" + RESET)
+            if geo.get("isp"):
+                print(WHITE + f"  ISP: {geo.get('isp')}" + RESET)
+            if geo.get("org"):
+                print(WHITE + f"  Organization: {geo.get('org')}" + RESET)
+        
+        if recon_data.get("dns"):
+            dns = recon_data["dns"]
+            print(WHITE + "\n[DNS Records]" + RESET)
+            for record_type, records in dns.items():
+                if records:
+                    print(WHITE + f"  {record_type}: {', '.join(records[:5])}" + RESET)
+        
+        if recon_data.get("subdomains"):
+            subdomains = recon_data["subdomains"]
+            print(WHITE + f"\n[Subdomains Found: {len(subdomains)}]" + RESET)
+            for sub in subdomains[:10]:  # Show first 10
+                print(WHITE + f"  • {sub}" + RESET)
+            if len(subdomains) > 10:
+                print(WHITE + f"  ... and {len(subdomains) - 10} more" + RESET)
+        
+        if recon_data.get("whois"):
+            whois = recon_data["whois"]
+            print(WHITE + "\n[WHOIS Information]" + RESET)
+            for key, values in list(whois.items())[:5]:  # Show first 5 fields
+                if values:
+                    print(WHITE + f"  {key}: {values[0] if isinstance(values, list) else values}" + RESET)
+        
+        if recon_data.get("http"):
+            http = recon_data["http"]
+            print(WHITE + "\n[HTTP Information]" + RESET)
+            if http.get("server"):
+                print(WHITE + f"  Server: {http.get('server')}" + RESET)
+            if http.get("status"):
+                print(WHITE + f"  Status: {http.get('status')}" + RESET)
+        
+        # Save to report
+        recon_entry = {
+            "input": target,
+            "target": target,
+            "resolved_ip": target if recon_type == "ip" else None,
+            "type": recon_type,
+            "geo": recon_data.get("geoip", {}),
+            "dns": recon_data.get("dns", {}),
+            "whois": recon_data.get("whois", {}),
+            "shodan": recon_data.get("shodan", {}),
+            "http": recon_data.get("http", {}),
+            "scan": {},
+            "vulnerabilities": [],
+            "suggestions": [],
+            "web_enum": {},
+            "osint": {
+                "subdomains": recon_data.get("subdomains", []),
+                "certificates": recon_data.get("certificates", {}),
+                "errors": recon_data.get("errors", [])
+            },
+        }
+        self.reporter.add_recon(recon_entry)
+        if recon_type == "ip":
+            self._cache_target_minimal(target, "OSINT Intelligence Gathering")
+        
+        if recon_data.get("errors"):
+            print(WHITE + f"\n⚠ Note: {len(recon_data['errors'])} tool(s) unavailable or failed" + RESET)
+        
+        print(WHITE + "\n✓ OSINT intelligence gathering completed!" + RESET)
 
     def _active_recon(self, ip: Optional[str]) -> Tuple[Dict[str, str], List[Dict[str, str]]]:
         if not ip:
@@ -380,13 +581,22 @@ class NetSpearNetworkAnalyzer:
         if not validate_ip(resolved_ip):
             return
 
-        geo = self._geo_lookup(resolved_ip)
-        http_info = self._http_fingerprint(url if target_type in {"website", "server"} else None)
+        # Use comprehensive reconnaissance for better results
+        print(WHITE + "Starting comprehensive target analysis..." + RESET)
+        recon_type = "domain" if target_type in {"website", "server"} else "ip"
+        recon_target = hostname if target_type in {"website", "server"} else resolved_ip
+        enhanced_recon_data = self.enhanced_recon.passive_recon_parallel(recon_target, recon_type)
+        
+        geo = enhanced_recon_data.get("geoip", self._geo_lookup(resolved_ip))
+        http_info = enhanced_recon_data.get("http", self._http_fingerprint(url if target_type in {"website", "server"} else None))
 
-        scan_result, vulnerabilities = self.scanner.run_nmap_scan(resolved_ip, "deep", self.args.stealth, self.args.proxy)
+        scan_result, vulnerabilities = self.scanner.run_nmap_scan(resolved_ip, "deep", self.args.stealth, self.args.proxy, self.mode)
         suggestions = self._build_suggestions(scan_result, vulnerabilities)
         web_enum = self._prompt_web_actions(target_ip=resolved_ip, scan_result=scan_result, auto_prompt=False)
+        
+        # SpiderFoot OSINT sweep
         spiderfoot_runs: List[Dict[str, Any]] = []
+        print()  # Add blank line for clarity
         if self._is_tool_available("spiderfoot") and self._confirm("Run SpiderFoot OSINT sweep? (y/n): "):
             sf_cmd = [self.tool_paths["spiderfoot"], "-s", hostname or resolved_ip, "-max-threads", "10"]
             spiderfoot_runs.append(self._run_cmd_capture(sf_cmd, "spiderfoot osint sweep", timeout=180, show_progress=True))
@@ -404,17 +614,32 @@ class NetSpearNetworkAnalyzer:
             "resolved_ip": resolved_ip,
             "type": target_type,
             "geo": geo,
+            "dns": enhanced_recon_data.get("dns", {}),
+            "whois": enhanced_recon_data.get("whois", {}),
+            "shodan": enhanced_recon_data.get("shodan", {}),
             "http": http_info,
             "scan": scan_result,
             "vulnerabilities": vulnerabilities,
             "suggestions": suggestions,
             "web_enum": web_enum or {},
-            "osint": {"spiderfoot": spiderfoot_runs} if spiderfoot_runs else {},
+            "osint": {
+                "spiderfoot": spiderfoot_runs if spiderfoot_runs else [],
+                "subdomains": enhanced_recon_data.get("subdomains", []),
+                "certificates": enhanced_recon_data.get("certificates", {}),
+                "errors": enhanced_recon_data.get("errors", [])
+            },
         }
         self.reporter.add_recon(recon_entry)
         self._print_suggestions(suggestions)
-        if vulnerabilities and self._confirm("Attempt exploitation on detected vulns? (y/n): "):
-            self.exploit_vulnerabilities(resolved_ip, vulnerabilities)
+        
+        # Exploitation prompt
+        if vulnerabilities:
+            print()  # Add blank line for clarity
+            if self._confirm("Attempt exploitation on detected vulns? (y/n): "):
+                self.exploit_vulnerabilities(resolved_ip, vulnerabilities)
+        
+        # Report export prompt
+        print()  # Add blank line for clarity
         if self._confirm("Export recon report now? (y/n): "):
             self.reporter.generate_report()
 
@@ -470,23 +695,41 @@ class NetSpearNetworkAnalyzer:
             web_enum["errors"].append("wafw00f not found; skipping WAF detection.")
 
         # Directory brute-force
-        wordlist = os.getenv("GOBUSTER_WORDLIST", "/usr/share/wordlists/dirb/common.txt")
-        if self._is_tool_available("ffuf"):
-            if os.path.exists(wordlist):
+        from config import DEFAULT_WORDLIST_PATH, ALTERNATIVE_WORDLISTS
+        wordlist = os.getenv("GOBUSTER_WORDLIST", DEFAULT_WORDLIST_PATH)
+        
+        # Try to find an available wordlist with better error handling
+        if not safe_file_check(wordlist, must_exist=True):
+            found = False
+            for alt_wordlist in ALTERNATIVE_WORDLISTS:
+                if safe_file_check(alt_wordlist, must_exist=True):
+                    wordlist = alt_wordlist
+                    logging.info(f"Using alternative wordlist: {wordlist}")
+                    found = True
+                    break
+            if not found:
+                print(QuickError.file_not_found(
+                    wordlist, 
+                    "Install wordlists: sudo apt install wordlists || Set GOBUSTER_WORDLIST env var"
+                ))
+                wordlist = None
+        
+        if wordlist and self._is_tool_available("ffuf"):
+            if safe_file_check(wordlist, must_exist=True):
                 web_enum["dir_enum"].append(self._run_cmd_capture([self.tool_paths["ffuf"], "-u", base_url.rstrip("/") + "/FUZZ", "-w", wordlist, "-t", "50", "-mc", "200,301,302,401,403"], "ffuf directory scan"))
             else:
                 msg = f"Wordlist missing ({wordlist}); skipping ffuf."
                 web_enum["errors"].append(msg)
                 print(WHITE + msg + RESET)
-        elif self._is_tool_available("gobuster"):
-            if os.path.exists(wordlist):
+        elif wordlist and self._is_tool_available("gobuster"):
+            if safe_file_check(wordlist, must_exist=True):
                 web_enum["dir_enum"].append(self._run_cmd_capture([self.tool_paths["gobuster"], "dir", "-u", base_url, "-w", wordlist, "-q", "-t", "50"], "gobuster directory scan"))
             else:
                 msg = f"Wordlist missing ({wordlist}); skipping gobuster."
                 web_enum["errors"].append(msg)
                 print(WHITE + msg + RESET)
-        elif self._is_tool_available("feroxbuster"):
-            if os.path.exists(wordlist):
+        elif wordlist and self._is_tool_available("feroxbuster"):
+            if safe_file_check(wordlist, must_exist=True):
                 web_enum["dir_enum"].append(self._run_cmd_capture([self.tool_paths["feroxbuster"], "-u", base_url, "-w", wordlist, "-q"], "feroxbuster directory scan"))
             else:
                 msg = f"Wordlist missing ({wordlist}); skipping feroxbuster."
@@ -498,9 +741,9 @@ class NetSpearNetworkAnalyzer:
             print(WHITE + msg + RESET)
 
         # Quick admin panel probe via HEAD requests.
-        admin_paths = ["/admin", "/login", "/dashboard", "/cp", "/administrator", "/manage", "/panel"]
+        from config import ADMIN_ENDPOINTS
         print(WHITE + "Probing common admin endpoints..." + RESET)
-        for path in admin_paths:
+        for path in ADMIN_ENDPOINTS:
             url = base_url + path
             try:
                 req = Request(url, method="HEAD", headers={"User-Agent": "NetSpear-AdminProbe/1.0"})
@@ -530,6 +773,7 @@ class NetSpearNetworkAnalyzer:
             web_enum["errors"].append("nuclei not found; skipping HTTP template scan.")
 
         # Optional SQLMap hook
+        print()  # Add blank line for clarity
         if self._is_tool_available("sqlmap") and self._confirm("Run sqlmap on a URL/param? (y/n): "):
             target_url = input(WHITE + f"Enter target URL (default: {base_url}): " + RESET).strip() or base_url
             sqlmap_cmd = [self.tool_paths["sqlmap"], "-u", target_url, "--batch", "--random-agent", "--level", "1", "--risk", "1"]
@@ -549,6 +793,7 @@ class NetSpearNetworkAnalyzer:
             print(WHITE + f"  [{i}] {s}" + RESET)
 
     def _is_tool_available(self, tool_key: str) -> bool:
+        """Check if a tool is available with better error handling."""
         cmd = self.tool_paths.get(tool_key, tool_key)
         alias_map = {
             "spiderfoot": [cmd, "sfcli", "spiderfoot", "spiderfoot-cli"],
@@ -559,10 +804,14 @@ class NetSpearNetworkAnalyzer:
                 self.tool_paths[tool_key] = candidate
                 return True
         try:
-            subprocess.run([cmd, "--version"], capture_output=True, timeout=5, check=False)
-            return True
-        except Exception:
-            return False
+            result = subprocess.run([cmd, "--version"], capture_output=True, timeout=5, check=False)
+            if result.returncode == 0 or "version" in result.stdout.lower() or "version" in result.stderr.lower():
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        except Exception as e:
+            logging.debug(f"Tool check failed for {tool_key}: {e}")
+        return False
 
     def _run_cmd_capture(self, cmd: List[str], desc: str, extra_env: Optional[Dict[str, str]] = None, timeout: int = 120, show_progress: bool = False, requires_sudo: bool = False) -> Dict[str, str]:
         print(WHITE + f"> {desc}: {' '.join(cmd)}" + RESET)
@@ -615,11 +864,18 @@ class NetSpearNetworkAnalyzer:
         except subprocess.TimeoutExpired:
             msg = f"{desc} timed out after {timeout}s"
             print(WHITE + msg + RESET)
-            return {"cmd": " ".join(cmd), "stdout": "", "stderr": msg, "returncode": -2}
-        except Exception as exc:  # noqa: BLE001
+            logging.warning(msg)
+            return {"cmd": " ".join(full_cmd if use_sudo else cmd), "stdout": "", "stderr": msg, "returncode": -2}
+        except (OSError, ValueError, FileNotFoundError) as exc:
             msg = f"{desc} failed: {exc}"
             print(WHITE + msg + RESET)
-            return {"cmd": " ".join(cmd), "stdout": "", "stderr": msg, "returncode": -1}
+            logging.error(msg)
+            return {"cmd": " ".join(full_cmd if use_sudo else cmd), "stdout": "", "stderr": msg, "returncode": -1}
+        except Exception as exc:
+            msg = f"{desc} failed with unexpected error: {exc}"
+            print(WHITE + msg + RESET)
+            logging.exception(f"Unexpected error in {desc}")
+            return {"cmd": " ".join(full_cmd if use_sudo else cmd), "stdout": "", "stderr": msg, "returncode": -1}
         finally:
             done_event.set()
             if worker:
@@ -680,20 +936,21 @@ class NetSpearNetworkAnalyzer:
         removed = self.reporter.clear_archived_reports()
         print(WHITE + f"Removed {removed} archived report(s)." + RESET)
 
-    def _toggle_killer_mode(self) -> None:
+    def _set_scan_mode(self) -> None:
+        """Configure scan operation mode."""
         modes = {
             "1": "SAFE",
             "2": "STEALTH",
             "3": "AGGRESSIVE",
-            "4": "INSANE",
-            "5": "KILLER",
+            "4": "INTENSIVE",
+            "5": "COMPREHENSIVE",
         }
-        print(WHITE + "\nSelect Mode:" + RESET)
-        print(WHITE + "  [1] Safe Scan       – lowest impact, conservative defaults" + RESET)
-        print(WHITE + "  [2] Stealth Scan    – reduced-noise scanning" + RESET)
-        print(WHITE + "  [3] Standard Scan   – balanced speed and coverage" + RESET)
-        print(WHITE + "  [4] Fast Scan       – accelerated scanning, fewer checks" + RESET)
-        print(WHITE + "  [5] Full Scan       – maximum coverage and intensity" + RESET)
+        print(WHITE + "\n=== Scan Mode Configuration ===" + RESET)
+        print(WHITE + "  [1] Safe Scan          – Lowest impact, conservative defaults" + RESET)
+        print(WHITE + "  [2] Stealth Scan       – Reduced-noise scanning" + RESET)
+        print(WHITE + "  [3] Standard Scan      – Balanced speed and coverage" + RESET)
+        print(WHITE + "  [4] Intensive Scan     – Accelerated scanning with comprehensive checks" + RESET)
+        print(WHITE + "  [5] Comprehensive Scan – Maximum coverage and intensity" + RESET)
         choice = input(WHITE + "Choose mode (1-5): " + RESET).strip()
         mode = modes.get(choice)
         if not mode:
@@ -760,6 +1017,25 @@ class NetSpearNetworkAnalyzer:
         except subprocess.CalledProcessError as e:
             print(WHITE + f"Failed to change MAC: {str(e)}" + RESET)
 
+    def _handle_syn_flood(self, target_ip: Optional[str]) -> None:
+        """Handle SYN flood attack with proper input validation."""
+        if not target_ip:
+            print(WHITE + "No target IP provided." + RESET)
+            return
+        if not validate_ip(target_ip):
+            return
+        port_input = input(WHITE + "Enter target port: " + RESET).strip()
+        if not port_input:
+            print(WHITE + "Port number is required." + RESET)
+            return
+        try:
+            port = int(port_input)
+            if not validate_port(port):
+                return
+            self.attacker.syn_flood(target_ip, port)
+        except ValueError:
+            print(WHITE + f"Invalid port number: {port_input}" + RESET)
+
     def exploit_vulnerabilities(self, target_ip: str, vulnerabilities: List[Dict[str, str]]) -> None:
         if not vulnerabilities:
             print(WHITE + "No exploitable vulnerabilities found." + RESET)
@@ -785,11 +1061,15 @@ class NetSpearNetworkAnalyzer:
         if input(WHITE + "Would you like to exploit these vulnerabilities? (y/n): " + RESET).lower() == "y":
             lhost = input(WHITE + "Enter your IP (LHOST) for reverse shells (e.g., 192.168.1.100): " + RESET)
             try:
-                lport = int(input(WHITE + "Enter a port (LPORT) for reverse shells (e.g., 4444): " + RESET))
-                if not (1 <= lport <= 65535):
-                    raise ValueError("Port must be between 1 and 65535.")
+                lport_input = input(WHITE + "Enter a port (LPORT) for reverse shells (e.g., 4444): " + RESET).strip()
+                if not lport_input:
+                    print(WHITE + "Port number is required." + RESET)
+                    return
+                lport = int(lport_input)
+                if not validate_port(lport):
+                    return
             except ValueError as e:
-                print(WHITE + f"Invalid port: {str(e)}" + RESET)
+                print(WHITE + f"Invalid port: {e}" + RESET)
                 return
             
             for vuln, exploit_module in exploitable:
@@ -834,34 +1114,42 @@ class NetSpearNetworkAnalyzer:
                         self.exploit_vulnerabilities(target_ip, vulnerabilities)
             except KeyboardInterrupt:
                 print(WHITE + "Operation aborted by user." + RESET)
-            except Exception as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except (ValueError, OSError, FileNotFoundError) as exc:
                 print(WHITE + f"Error running '{action['desc']}': {exc}" + RESET)
-                logging.exception("Menu action failed: %s", action["desc"])
+                logging.error("Menu action failed: %s - %s", action["desc"], exc)
+            except Exception as exc:
+                print(WHITE + f"Unexpected error running '{action['desc']}': {exc}" + RESET)
+                logging.exception("Unexpected error in menu action: %s", action["desc"])
 
     def _base_options(self) -> Dict[str, Dict[str, Any]]:
         return {
-            "1": {"desc": "Passive Recon", "handler": lambda ip: self._passive_recon(ip), "needs_target": True},
-            "2": {"desc": "Active Recon", "handler": lambda ip: self._active_recon(ip), "needs_target": True},
-            "3": {"desc": "Information Gathering", "handler": lambda _: self.information_gathering(), "needs_target": False},
-            "10": {"desc": "Quick Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "quick", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "11": {"desc": "Full Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "full", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "12": {"desc": "Vulnerability Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "vuln", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
-            "13": {"desc": "Stealth Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "stealth", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "1": {"desc": "Passive Reconnaissance (OSINT)", "handler": lambda ip: self._passive_recon(ip), "needs_target": True},
+            "2": {"desc": "Active Reconnaissance (Network Scan)", "handler": lambda ip: self._active_recon(ip), "needs_target": True},
+            "3": {"desc": "Comprehensive Target Analysis", "handler": lambda _: self.information_gathering(), "needs_target": False},
+            "4": {"desc": "OSINT Intelligence Gathering", "handler": lambda _: self._enhanced_osint_recon(), "needs_target": False},
+            "10": {"desc": "Quick Port Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "quick", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "11": {"desc": "Comprehensive Port Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "full", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "12": {"desc": "Vulnerability Assessment", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "vuln", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
+            "13": {"desc": "Stealth Port Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "stealth", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
             "14": {"desc": "Multi-Target Scan", "handler": lambda _: self._handle_multi_target_scan(), "needs_target": False},
             "20": {"desc": "Generate Payloads", "handler": lambda ip: self.payload_generator.generate_payloads(ip), "needs_target": True},
             "21": {"desc": self._mode_payload_pack_label(), "handler": lambda ip: self.payload_generator.generate_mode_payloads(self.mode, ip), "needs_target": True},
-            "22": {"desc": self._mode_brute_label(), "handler": lambda ip: self.attacker.brute_force_overdrive(ip), "needs_target": True},
-            "23": {"desc": "SYN Flood", "handler": lambda ip: self.attacker.syn_flood(ip, int(input(WHITE + "Enter target port: " + RESET))), "needs_target": True, "destructive": True},
-            "24": {"desc": "MAC Spoofing", "handler": lambda _: self.spoof_mac(), "needs_target": False},
-            "25": {"desc": "ARP Spoofing", "handler": lambda ip: self.attacker.arp_spoof(ip, input(WHITE + "Enter gateway IP: " + RESET)), "needs_target": True, "destructive": True},
-            "26": {"desc": "DNS Poisoning", "handler": lambda ip: self.attacker.dns_poison(ip, input(WHITE + "Enter fake IP: " + RESET)), "needs_target": True, "destructive": True},
+            "22": {"desc": self._mode_brute_label(), "handler": lambda ip: self.attacker.credential_testing(ip), "needs_target": True},
+            "23": {"desc": "Network Stress Test", "handler": lambda ip: self._handle_syn_flood(ip), "needs_target": True, "destructive": True},
+            "24": {"desc": "MAC Address Spoofing", "handler": lambda _: self.spoof_mac(), "needs_target": False},
+            "25": {"desc": "ARP Cache Poisoning Test", "handler": lambda ip: self.attacker.arp_spoof(ip, input(WHITE + "Enter gateway IP: " + RESET)), "needs_target": True, "destructive": True},
+            "26": {"desc": "DNS Cache Poisoning Test", "handler": lambda ip: self.attacker.dns_poison(ip, input(WHITE + "Enter fake IP: " + RESET)), "needs_target": True, "destructive": True},
             "30": {"desc": "Generate Report", "handler": lambda _: self.reporter.generate_report(), "needs_target": False},
-            "31": {"desc": "View Gathered Info", "handler": lambda _: self._show_gathered_info(), "needs_target": False},
+            "31": {"desc": "View Gathered Intelligence", "handler": lambda _: self._show_gathered_info(), "needs_target": False},
             "32": {"desc": "Archive Old Reports", "handler": lambda _: self._archive_reports(), "needs_target": False},
             "33": {"desc": "Clear Reports", "handler": lambda _: self._clear_reports(), "needs_target": False, "destructive": True},
             "34": {"desc": "Clear Archives", "handler": lambda _: self._clear_archived_reports(), "needs_target": False, "destructive": True},
-            "40": {"desc": "Set Mode", "handler": lambda _: self._toggle_killer_mode(), "needs_target": False},
+            "40": {"desc": "Configure Scan Mode", "handler": lambda _: self._set_scan_mode(), "needs_target": False},
             "41": {"desc": "Reset Target", "handler": lambda _: self._reset_target(), "needs_target": False},
+            "42": {"desc": "Plugin Management (BETA)", "handler": lambda _: self._plugin_management(), "needs_target": False},
+            "43": {"desc": "Create Config File", "handler": lambda _: self._create_config(), "needs_target": False},
             "0": {"desc": "Exit", "handler": lambda _: self._exit(), "needs_target": False}
         }
 
@@ -872,11 +1160,42 @@ class NetSpearNetworkAnalyzer:
         payload_pack_label = self._mode_payload_pack_label()
         brute_label = self._mode_brute_label()
         return [
-            ("1 — RECONNAISSANCE", [("01", "Passive Recon"), ("02", "Active Recon"), ("03", "Information Gathering")]),
-            ("2 — SCANNING", [("10", "Quick Scan"), ("11", "Full Scan"), ("12", "Vulnerability Scan"), ("13", "Stealth Scan"), ("14", "Multi-Target Scan")]),
-            ("3 — EXPLOITATION & ATTACKS", [("20", "Generate Payloads"), ("21", payload_pack_label), ("22", brute_label), ("23", "SYN Flood"), ("24", "MAC Spoofing"), ("25", "ARP Spoofing"), ("26", "DNS Poisoning")]),
-            ("4 — REPORTING", [("30", "Generate Report"), ("31", "View Gathered Info"), ("32", "Archive Old Reports"), ("33", "Clear Reports"), ("34", "Clear Archives")]),
-            ("5 — CONFIGURATION / SYSTEM", [("40", "Set Mode"), ("41", "Reset Target"), ("00", "Exit")]),
+            ("1 — RECONNAISSANCE", [
+                ("01", "Passive Reconnaissance (OSINT)"),
+                ("02", "Active Reconnaissance (Network Scan)"),
+                ("03", "Comprehensive Target Analysis"),
+                ("04", "OSINT Intelligence Gathering")
+            ]),
+            ("2 — SCANNING", [
+                ("10", "Quick Port Scan"),
+                ("11", "Comprehensive Port Scan"),
+                ("12", "Vulnerability Assessment"),
+                ("13", "Stealth Port Scan"),
+                ("14", "Multi-Target Scan")
+            ]),
+            ("3 — EXPLOITATION & TESTING", [
+                ("20", "Generate Payloads"),
+                ("21", payload_pack_label),
+                ("22", brute_label),
+                ("23", "Network Stress Test"),
+                ("24", "MAC Address Spoofing"),
+                ("25", "ARP Cache Poisoning Test"),
+                ("26", "DNS Cache Poisoning Test")
+            ]),
+            ("4 — REPORTING", [
+                ("30", "Generate Report"),
+                ("31", "View Gathered Intelligence"),
+                ("32", "Archive Old Reports"),
+                ("33", "Clear Reports"),
+                ("34", "Clear Archives")
+            ]),
+            ("5 — CONFIGURATION / SYSTEM", [
+                ("40", "Configure Scan Mode"),
+                ("41", "Reset Target"),
+                ("42", "Plugin Management (BETA)"),
+                ("43", "Create Config File"),
+                ("00", "Exit")
+            ]),
         ]
 
     def _display_menu(self, sections: Optional[List[Tuple[str, List[Tuple[str, str]]]]] = None) -> None:
@@ -884,10 +1203,11 @@ class NetSpearNetworkAnalyzer:
         mode_color = MODE_COLORS.get(mode, WHITE)
         colored_mode = mode_color + f"{self._mode_label(mode)}" + RESET
         header = [
-            "┌───────────────────────────────────────────────────────────┐",
-            "│                   NETSPEAR NETWORK ANALYZER               │",
-            f"│                      Version 1.0  |  Mode: {colored_mode:<12}│",
-            "└───────────────────────────────────────────────────────────┘",
+            "┌─────────────────────────────────────────────────────────────┐",
+            "│              NETSPEAR NETWORK ANALYZER v2.0                │",
+            f"│                    Mode: {colored_mode:<20}│",
+            "│              © 2025 OpenNET LLC - All Rights Reserved       │",
+            "└─────────────────────────────────────────────────────────────┘",
         ]
         sections = sections or self._base_sections()
         for line in header:
@@ -915,11 +1235,9 @@ class NetSpearNetworkAnalyzer:
         exit_cleanly()
 
 if __name__ == "__main__":
-    try:
-        if hasattr(os, "geteuid") and os.geteuid() != 0:
-            print(WHITE + "Elevating to root with sudo for full NetSpear capabilities..." + RESET)
-            os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
-    except Exception:
-        pass
+    # Note: NetSpear requires root privileges for certain operations (ARP spoofing, SYN flood, etc.)
+    # Users should run with sudo explicitly: sudo python3 main.py
+    # Auto-elevation has been removed for security reasons.
     analyzer = NetSpearNetworkAnalyzer()
     analyzer.main_menu()
+    

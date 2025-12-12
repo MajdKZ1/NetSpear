@@ -1,6 +1,280 @@
+# NetSpear .gitignore
+# Comprehensive ignore patterns for Python security tool project
+
+# ============================================
+# Python
+# ============================================
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual Environments
 .venv/
+venv/
+ENV/
+env/
+.conda/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# ============================================
+# NetSpear Specific
+# ============================================
+
+# Reports and Archives
 Reports/
-NetSpear/__pycache__/payloads.cpython-313.pyc
-NetSpear/__pycache__/payloads.cpython-313.pyc
-.DS_Store/
+NetSpear/Reports/
+**/Reports/**/*.html
+**/Reports/**/*.json
+**/Reports/Archive/
+*.html
+*.json
+!templates/*.html
+
+# Generated Payloads
+*.exe
+*.elf
+*.macho
+*.apk
+*.war
+*.raw
+payload_*
+*_payload_*
+*_meterpreter_*
+*_reverse_*
+
+# Logs
+*.log
+logs/
+NetSpear/*.log
+*.log.*
+
+# Configuration files (may contain secrets)
+config.yaml
+config.json
+netspear.yaml
+netspear.json
+*.local.yaml
+*.local.json
+!config_loader.py
+!config.py
+
+# Plugin cache and compiled plugins
+plugins/__pycache__/
+plugins/*.pyc
+*.pyc
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+test-results/
+*.cover
+*.py,cover
+.cache
+nosetests.xml
+coverage.xml
+*.coveragerc
+
+# ============================================
+# Security & Sensitive Data
+# ============================================
+
+# API Keys and Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.yaml
+secrets.json
+credentials.*
+*.credentials
+
+# Scan results with sensitive data
+scan_results/
+*.nmap
+*.xml
+*.gnmap
+
+# Wordlists (if large)
+wordlists/
+*.txt
+!requirements.txt
+!README.md
+!LICENSE
+!CHANGELOG*.md
+!PLUGINS.md
+!CONFIG.md
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# OS Specific
+# ============================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================
+# IDE and Editor Files
+# ============================================
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Atom
+.atom/
+
+# ============================================
+# Temporary and Backup Files
+# ============================================
+
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+*.swp
+*~
+
+# ============================================
+# Build and Distribution
+# ============================================
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.tar.gz
+*.zip
+*.whl
+
+# ============================================
+# Documentation Build
+# ============================================
+
+docs/_build/
+site/
+
+# ============================================
+# Miscellaneous
+# ============================================
+
+# Compiled binaries
+*.bin
+*.o
+*.a
+
+# Archives (except source)
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Keep example files
+!NetSpear/plugins/example_*.py
+!NetSpear/templates/*.html
