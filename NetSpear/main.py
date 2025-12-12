@@ -60,6 +60,7 @@ from scheduler import ScanScheduler
 from notifier import NotificationManager
 from wordlist_manager import WordlistManager
 from scanner_integration import ScannerIntegration
+from social_engineering import SocialEngineeringToolkit
 from api import set_analyzer, run_api_server
 
 # Define NetSpear Purple options
@@ -151,6 +152,7 @@ class NetSpearNetworkAnalyzer:
         self.notifier = NotificationManager()
         self.wordlist_manager = WordlistManager()
         self.scanner_integration = ScannerIntegration()
+        self.se_toolkit = SocialEngineeringToolkit()
         
         # Initialize plugin system
         self.plugin_manager = PluginManager()
@@ -319,6 +321,7 @@ class NetSpearNetworkAnalyzer:
                 suggestions.append("Web app review: session flags (HttpOnly/Secure/SameSite), auth flows/MFA, TLS config/ciphers, outdated components, access controls/request filtering.")
                 if self.advanced_mode:
                     suggestions.append("Advanced: run nmap --script vuln/nikto, probe uploads for webshell, test weak HTTP auth, try default creds on common panels.")
+                    suggestions.append("Social Engineering: Consider phishing templates for credential harvesting if authorized (Office365, security alerts, password resets).")
             if num == 22 or service == "ssh":
                 suggestions.append("SSH open: check weak creds and banner versions; brute with hydra if allowed; enumerate authorized_keys if filesystem access found.")
             if num == 21 or service == "ftp":
@@ -827,9 +830,151 @@ class NetSpearNetworkAnalyzer:
     def _print_suggestions(self, suggestions: List[str]) -> None:
         if not suggestions:
             return
-        print(WHITE + "\nAttack suggestions:" + RESET)
-        for i, s in enumerate(suggestions, 1):
-            print(WHITE + f"  [{i}] {s}" + RESET)
+        print(WHITE + "\n=== Attack Suggestions ===" + RESET)
+        print(WHITE + "⚠️  WARNING: All attack suggestions require explicit authorization" + RESET)
+        print(WHITE + "Press 'y' for each suggestion you want to execute, 'n' to skip, or 'a' to execute all\n" + RESET)
+        
+        for i, suggestion in enumerate(suggestions, 1):
+            print(WHITE + f"\n[{i}] {suggestion}" + RESET)
+            
+            # Check if this is a social engineering suggestion
+            is_se_suggestion = "phishing" in suggestion.lower() or "social engineering" in suggestion.lower()
+            
+            if is_se_suggestion:
+                print(WHITE + "   → This is a social engineering attack suggestion" + RESET)
+            
+            response = input(WHITE + f"   Execute suggestion [{i}]? (y/n/a for all): " + RESET).strip().lower()
+            
+            if response == "a":
+                # Execute all remaining suggestions
+                print(WHITE + f"\n✓ Executing all remaining suggestions..." + RESET)
+                for j in range(i, len(suggestions)):
+                    self._execute_suggestion(suggestions[j], j + 1)
+                break
+            elif response == "y":
+                self._execute_suggestion(suggestion, i)
+            else:
+                print(WHITE + f"   Skipped suggestion [{i}]" + RESET)
+    
+    def _execute_suggestion(self, suggestion: str, suggestion_num: int) -> None:
+        """
+        Execute an attack suggestion based on its content.
+        
+        Args:
+            suggestion: The suggestion text
+            suggestion_num: Suggestion number for display
+        """
+        suggestion_lower = suggestion.lower()
+        
+        # Social engineering / phishing suggestions
+        if "phishing" in suggestion_lower or "social engineering" in suggestion_lower:
+            if not self._confirm(f"⚠️  This is a SOCIAL ENGINEERING attack. Continue? (y/n): "):
+                print(WHITE + f"   Social engineering suggestion [{suggestion_num}] cancelled." + RESET)
+                return
+            self._handle_se_suggestion(suggestion, suggestion_num)
+        
+        # Web enumeration suggestions
+        elif any(term in suggestion_lower for term in ["enumerate dirs", "gobuster", "feroxbuster", "directory"]):
+            if not self._confirm(f"Execute web directory enumeration? (y/n): "):
+                return
+            self._handle_web_enum_suggestion(suggestion, suggestion_num)
+        
+        # Brute force suggestions
+        elif any(term in suggestion_lower for term in ["brute", "hydra", "credential testing"]):
+            if not self._confirm(f"⚠️  This involves BRUTE FORCING. Continue? (y/n): "):
+                return
+            self._handle_brute_force_suggestion(suggestion, suggestion_num)
+        
+        # Other attack suggestions
+        else:
+            if not self._confirm(f"Execute this attack suggestion? (y/n): "):
+                return
+            print(WHITE + f"   Suggestion [{suggestion_num}] requires manual execution:" + RESET)
+            print(WHITE + f"   → {suggestion}" + RESET)
+    
+    def _handle_se_suggestion(self, suggestion: str, suggestion_num: int) -> None:
+        """Handle social engineering/phishing suggestions."""
+        print(WHITE + f"\n=== Social Engineering Toolkit ===" + RESET)
+        
+        # Show available templates
+        templates = self.se_toolkit.list_templates()
+        if not templates:
+            print(WHITE + "No phishing templates available." + RESET)
+            return
+        
+        print(WHITE + "\nAvailable phishing templates:" + RESET)
+        for i, template in enumerate(templates, 1):
+            print(WHITE + f"  [{i}] {template['name']}" + RESET)
+        
+        choice = input(WHITE + "\nSelect template (1-{}): ".format(len(templates)) + RESET).strip()
+        try:
+            template_idx = int(choice) - 1
+            if 0 <= template_idx < len(templates):
+                selected_template = templates[template_idx]
+                
+                # Get phishing URL
+                phishing_url = input(WHITE + "Enter phishing URL (e.g., http://192.168.1.100/phish): " + RESET).strip()
+                if not phishing_url:
+                    print(WHITE + "Phishing URL required. Aborted." + RESET)
+                    return
+                
+                # Get recipient email
+                recipient_email = input(WHITE + "Recipient email (optional, for template): " + RESET).strip()
+                if not recipient_email:
+                    recipient_email = "target@example.com"
+                
+                # Generate email
+                email_content = self.se_toolkit.generate_phishing_email(
+                    selected_template["name"],
+                    phishing_url,
+                    recipient_email,
+                    timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    location="Unknown Location",
+                )
+                
+                if email_content:
+                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    filename = f"phishing_{selected_template['name']}_{timestamp}.html"
+                    saved_path = self.se_toolkit.save_generated_email(email_content, filename)
+                    
+                    if saved_path:
+                        print(WHITE + f"\n✓ Phishing email generated successfully!" + RESET)
+                        print(WHITE + f"   Saved to: {saved_path}" + RESET)
+                        print(WHITE + f"   Phishing URL: {phishing_url}" + RESET)
+                        print(WHITE + f"\n⚠️  REMEMBER: Only use this in authorized security testing!" + RESET)
+                    else:
+                        print(WHITE + "Failed to save generated email." + RESET)
+                else:
+                    print(WHITE + "Failed to generate phishing email." + RESET)
+            else:
+                print(WHITE + "Invalid template selection." + RESET)
+        except ValueError:
+            print(WHITE + "Invalid selection." + RESET)
+    
+    def _handle_web_enum_suggestion(self, suggestion: str, suggestion_num: int) -> None:
+        """Handle web enumeration suggestions."""
+        target_ip = self.current_target_info.get("ip")
+        if not target_ip:
+            target_ip = input(WHITE + "Enter target IP: " + RESET).strip()
+            if not target_ip:
+                print(WHITE + "Target IP required." + RESET)
+                return
+        
+        print(WHITE + f"   Executing web enumeration on {target_ip}..." + RESET)
+        # Web enumeration would be executed here
+        print(WHITE + f"   Note: Manual web enumeration tools recommended: gobuster, ffuf, feroxbuster" + RESET)
+    
+    def _handle_brute_force_suggestion(self, suggestion: str, suggestion_num: int) -> None:
+        """Handle brute force suggestions."""
+        target_ip = self.current_target_info.get("ip")
+        if not target_ip:
+            target_ip = input(WHITE + "Enter target IP: " + RESET).strip()
+            if not target_ip:
+                print(WHITE + "Target IP required." + RESET)
+                return
+        
+        print(WHITE + f"   Brute force suggestion requires manual execution with hydra." + RESET)
+        print(WHITE + f"   Target: {target_ip}" + RESET)
 
     def _is_tool_available(self, tool_key: str) -> bool:
         """Check if a tool is available with better error handling."""
@@ -1203,6 +1348,7 @@ class NetSpearNetworkAnalyzer:
             "41": {"desc": "Reset Target", "handler": lambda _: self._reset_target(), "needs_target": False},
             "42": {"desc": "Plugin Management (BETA)", "handler": lambda _: self._plugin_management(), "needs_target": False},
             "43": {"desc": "Create Config File", "handler": lambda _: self._create_config(), "needs_target": False},
+            "44": {"desc": "Update NetSpear", "handler": lambda _: self._update_netspear(), "needs_target": False},
             "50": {"desc": "Session Management", "handler": lambda _: self._session_management(), "needs_target": False},
             "51": {"desc": "Credential Management", "handler": lambda _: self._credential_management(), "needs_target": False},
             "52": {"desc": "Post-Exploitation", "handler": lambda _: self._post_exploitation_menu(), "needs_target": False},
@@ -1216,6 +1362,7 @@ class NetSpearNetworkAnalyzer:
             "60": {"desc": "Wordlist Management", "handler": lambda _: self._wordlist_menu(), "needs_target": False},
             "61": {"desc": "Scanner Integration", "handler": lambda _: self._scanner_integration_menu(), "needs_target": False},
             "62": {"desc": "Start API Server", "handler": lambda _: self._start_api_server(), "needs_target": False},
+            "63": {"desc": "Social Engineering Toolkit (BETA)", "handler": lambda _: self._se_toolkit_menu(), "needs_target": False},
             "0": {"desc": "Exit", "handler": lambda _: self._exit(), "needs_target": False}
         }
 
@@ -1264,6 +1411,7 @@ class NetSpearNetworkAnalyzer:
                 ("41", "Reset Target"),
                 ("42", "Plugin Management (BETA)"),
                 ("43", "Create Config File"),
+                ("44", "Update NetSpear"),
                 ("5+", "▶ Show Advanced Features (BETA)" if not self.expanded_sections.get("advanced") else "▼ Hide Advanced Features (BETA)"),
             ] + ([
                 # Advanced Features (shown when expanded)
@@ -1280,6 +1428,7 @@ class NetSpearNetworkAnalyzer:
                 ("60", "Wordlist Management (BETA)"),
                 ("61", "Scanner Integration (BETA)"),
                 ("62", "Start API Server (BETA)"),
+                ("63", "Social Engineering Toolkit (BETA)"),
             ] if self.expanded_sections.get("advanced") else []) + [
                 ("00", "Exit")
             ]),
@@ -1588,6 +1737,64 @@ class NetSpearNetworkAnalyzer:
         except Exception as e:
             print(WHITE + f"Error creating config: {e}" + RESET)
     
+    def _update_netspear(self) -> None:
+        """Update NetSpear to the latest version."""
+        import subprocess
+        from pathlib import Path
+        
+        print(WHITE + "\n=== NetSpear Update ===" + RESET)
+        print(WHITE + "This will update NetSpear to the latest version from GitHub." + RESET)
+        print(WHITE + "Repository: https://github.com/MajdKZ1/NetSpear.git" + RESET)
+        print()
+        
+        confirm = input(WHITE + "Continue with update? (y/n): " + RESET).strip().lower()
+        if confirm != "y":
+            print(WHITE + "Update cancelled." + RESET)
+            return
+        
+        # Find update script
+        update_script = Path(__file__).parent.parent / "update.sh"
+        if not update_script.exists():
+            # Try alternative location
+            update_script = Path(__file__).parent.parent.parent / "update.sh"
+        
+        if not update_script.exists():
+            print(WHITE + "Error: update.sh not found. Please run the update script manually:" + RESET)
+            print(WHITE + "  ./update.sh" + RESET)
+            return
+        
+        print(WHITE + f"\nExecuting update script: {update_script}" + RESET)
+        print(WHITE + "Please follow the prompts in the update script..." + RESET)
+        print()
+        
+        try:
+            # Make sure script is executable
+            import stat
+            update_script.chmod(update_script.stat().st_mode | stat.S_IEXEC)
+            
+            # Run the update script
+            result = subprocess.run(
+                ["bash", str(update_script)],
+                cwd=update_script.parent,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                print()
+                print(WHITE + "✓ Update completed successfully!" + RESET)
+                print(WHITE + "You may need to restart NetSpear to use the updated version." + RESET)
+            else:
+                print()
+                print(WHITE + "⚠ Update script exited with errors. Check the output above." + RESET)
+                print(WHITE + "You can also run the update script manually: ./update.sh" + RESET)
+        except FileNotFoundError:
+            print(WHITE + "Error: bash not found. Please run the update script manually:" + RESET)
+            print(WHITE + f"  bash {update_script}" + RESET)
+        except Exception as e:
+            print(WHITE + f"Error running update script: {e}" + RESET)
+            print(WHITE + "Please run the update script manually:" + RESET)
+            print(WHITE + f"  bash {update_script}" + RESET)
+    
     def _start_api_server(self) -> None:
         """Start REST API server."""
         host = input(WHITE + "Host (default: 127.0.0.1): " + RESET).strip() or "127.0.0.1"
@@ -1602,6 +1809,95 @@ class NetSpearNetworkAnalyzer:
             print(WHITE + "Invalid port number" + RESET)
         except KeyboardInterrupt:
             print(WHITE + "\nAPI server stopped" + RESET)
+    
+    def _se_toolkit_menu(self) -> None:
+        """Social Engineering Toolkit menu."""
+        print(WHITE + "\n=== Social Engineering Toolkit ===" + RESET)
+        print(WHITE + "⚠️  WARNING: Only use this for authorized security testing!" + RESET)
+        print()
+        
+        if not self._confirm("Do you have authorization to perform social engineering tests? (y/n): "):
+            print(WHITE + "Access denied. Social engineering requires explicit authorization." + RESET)
+            return
+        
+        print(WHITE + "\n[1] List Phishing Templates" + RESET)
+        print(WHITE + "[2] Generate Phishing Email" + RESET)
+        print(WHITE + "[3] View Template" + RESET)
+        choice = input(WHITE + "Select option (1-3): " + RESET).strip()
+        
+        if choice == "1":
+            templates = self.se_toolkit.list_templates()
+            if templates:
+                print(WHITE + "\nAvailable phishing templates:" + RESET)
+                for i, template in enumerate(templates, 1):
+                    print(WHITE + f"  [{i}] {template['name']}" + RESET)
+            else:
+                print(WHITE + "No templates found." + RESET)
+        
+        elif choice == "2":
+            templates = self.se_toolkit.list_templates()
+            if not templates:
+                print(WHITE + "No templates available." + RESET)
+                return
+            
+            print(WHITE + "\nAvailable templates:" + RESET)
+            for i, template in enumerate(templates, 1):
+                print(WHITE + f"  [{i}] {template['name']}" + RESET)
+            
+            template_choice = input(WHITE + "Select template (1-{}): ".format(len(templates)) + RESET).strip()
+            try:
+                template_idx = int(template_choice) - 1
+                if 0 <= template_idx < len(templates):
+                    selected_template = templates[template_idx]
+                    
+                    phishing_url = input(WHITE + "Phishing URL: " + RESET).strip()
+                    recipient_email = input(WHITE + "Recipient email: " + RESET).strip() or "target@example.com"
+                    
+                    email_content = self.se_toolkit.generate_phishing_email(
+                        selected_template["name"],
+                        phishing_url,
+                        recipient_email
+                    )
+                    
+                    if email_content:
+                        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                        filename = f"phishing_{selected_template['name']}_{timestamp}.html"
+                        saved_path = self.se_toolkit.save_generated_email(email_content, filename)
+                        
+                        if saved_path:
+                            print(WHITE + f"\n✓ Phishing email generated: {saved_path}" + RESET)
+                            print(WHITE + f"⚠️  REMEMBER: Only use this in authorized security testing!" + RESET)
+                        else:
+                            print(WHITE + "Failed to save email." + RESET)
+                else:
+                    print(WHITE + "Invalid selection." + RESET)
+            except ValueError:
+                print(WHITE + "Invalid input." + RESET)
+        
+        elif choice == "3":
+            templates = self.se_toolkit.list_templates()
+            if not templates:
+                print(WHITE + "No templates available." + RESET)
+                return
+            
+            print(WHITE + "\nAvailable templates:" + RESET)
+            for i, template in enumerate(templates, 1):
+                print(WHITE + f"  [{i}] {template['name']}" + RESET)
+            
+            template_choice = input(WHITE + "Select template to view (1-{}): ".format(len(templates)) + RESET).strip()
+            try:
+                template_idx = int(template_choice) - 1
+                if 0 <= template_idx < len(templates):
+                    template_path = Path(templates[template_idx]["path"])
+                    if template_path.exists():
+                        print(WHITE + f"\nTemplate location: {template_path}" + RESET)
+                        print(WHITE + "Open the file in a browser to preview." + RESET)
+                    else:
+                        print(WHITE + "Template file not found." + RESET)
+                else:
+                    print(WHITE + "Invalid selection." + RESET)
+            except ValueError:
+                print(WHITE + "Invalid input." + RESET)
     
     def _exit(self) -> None:
         # Clear once on exit for a clean terminal.
