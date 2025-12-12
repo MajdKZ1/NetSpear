@@ -123,7 +123,7 @@ class NetSpearNetworkAnalyzer:
         self.db_manager = init_database(db_url, db_path)
         
         # Initialize components
-        self.scanner = NetworkScanner()
+        self.scanner = NetworkScanner(enable_advanced_scanning=True)
         self.payload_generator = PayloadGenerator()
         self.attacker = NetworkAttacker()
         self.reporter = ReportGenerator(base_dir=self.config_loader.get_reports_dir())
@@ -604,6 +604,162 @@ class NetSpearNetworkAnalyzer:
         if not ip:
             return {}, []
         return self.scanner.run_nmap_scan(ip, "deep", self.args.stealth, self.args.proxy, self.mode)
+    
+    def _advanced_vulnerability_scan(self, ip: Optional[str]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Run comprehensive vulnerability assessment with multi-vector analysis.
+        
+        This performs enterprise-grade vulnerability detection including:
+        - Real CVSS database integration (NVD API)
+        - Service version fingerprinting with CVE lookup
+        - Web application vulnerability scanning
+        - TLS/SSL deep analysis
+        - Security headers analysis
+        - Configuration misconfiguration detection
+        - False positive reduction
+        """
+        if not ip:
+            print(WHITE + "No target IP provided." + RESET)
+            return {}, []
+        
+        if not validate_ip(ip):
+            print(WHITE + f"Invalid IP address: {ip}" + RESET)
+            return {}, []
+        
+        print(WHITE + f"\n{'='*70}" + RESET)
+        print(WHITE + f"  COMPREHENSIVE VULNERABILITY ASSESSMENT" + RESET)
+        print(WHITE + f"{'='*70}" + RESET)
+        print(WHITE + f"Target: {ip}" + RESET)
+        print(WHITE + f"Mode: {self._mode_label(self.mode)}" + RESET)
+        print(WHITE + "\nThis scan will perform:" + RESET)
+        print(WHITE + "  • Service version fingerprinting with CVE database lookup" + RESET)
+        print(WHITE + "  • Web application vulnerability scanning" + RESET)
+        print(WHITE + "  • TLS/SSL deep analysis" + RESET)
+        print(WHITE + "  • Security headers analysis" + RESET)
+        print(WHITE + "  • Configuration misconfiguration detection" + RESET)
+        print(WHITE + "  • Real CVSS scoring from NVD API" + RESET)
+        print(WHITE + "  • False positive reduction and verification" + RESET)
+        
+        # First, run a deep scan to get port and service information
+        print(WHITE + "\n[Step 1/2] Running deep port and service scan..." + RESET)
+        scan_result, nmap_vulns = self.scanner.run_nmap_scan(
+            ip, 
+            "deep", 
+            self.args.stealth, 
+            self.args.proxy, 
+            self.mode
+        )
+        
+        if not scan_result or not scan_result.get("ports"):
+            print(WHITE + "No open ports detected. Cannot perform advanced vulnerability scanning." + RESET)
+            return scan_result or {}, nmap_vulns or []
+        
+        ports = scan_result.get("ports", [])
+        open_ports = [p for p in ports if p.get("state") == "open"]
+        
+        if not open_ports:
+            print(WHITE + "No open ports detected. Cannot perform advanced vulnerability scanning." + RESET)
+            return scan_result, nmap_vulns or []
+        
+        print(WHITE + f"\n[Step 2/2] Running advanced vulnerability analysis on {len(open_ports)} open port(s)..." + RESET)
+        
+        # Check if advanced scanner is available
+        if not hasattr(self.scanner, 'advanced_scanner') or not self.scanner.advanced_scanner:
+            print(WHITE + "\n⚠️  Advanced scanner not available. Falling back to standard vulnerability scan." + RESET)
+            print(WHITE + "   Run with 'vuln' scan type for Nmap vulnerability scripts." + RESET)
+            return scan_result, nmap_vulns or []
+        
+        try:
+            # Run comprehensive advanced vulnerability scanning
+            advanced_vulns = self.scanner.advanced_scanner.scan_comprehensive(
+                ip,
+                open_ports,
+                scan_result
+            )
+            
+            # Merge with Nmap findings (avoid duplicates)
+            all_vulns = nmap_vulns or []
+            existing_keys = {(v.get("cve"), v.get("port"), v.get("description", "")[:50]) 
+                           for v in all_vulns}
+            
+            for adv_vuln in advanced_vulns:
+                vuln_key = (
+                    adv_vuln.get("cve"), 
+                    adv_vuln.get("port"), 
+                    adv_vuln.get("description", "")[:50]
+                )
+                if vuln_key not in existing_keys:
+                    all_vulns.append(adv_vuln)
+                    existing_keys.add(vuln_key)
+            
+            # Display results summary
+            print(WHITE + f"\n{'='*70}" + RESET)
+            print(WHITE + f"  SCAN COMPLETE" + RESET)
+            print(WHITE + f"{'='*70}" + RESET)
+            print(WHITE + f"Total vulnerabilities found: {len(all_vulns)}" + RESET)
+            
+            if all_vulns:
+                # Group by severity
+                severity_counts = {}
+                for vuln in all_vulns:
+                    sev = vuln.get("severity", "unknown")
+                    severity_counts[sev] = severity_counts.get(sev, 0) + 1
+                
+                print(WHITE + "\nSeverity breakdown:" + RESET)
+                for sev in ["critical", "high", "medium", "low", "info", "unknown"]:
+                    count = severity_counts.get(sev, 0)
+                    if count > 0:
+                        color = {
+                            "critical": "\033[91m",  # Red
+                            "high": "\033[93m",      # Yellow
+                            "medium": "\033[96m",    # Cyan
+                            "low": "\033[92m",       # Green
+                            "info": "\033[94m",      # Blue
+                        }.get(sev, WHITE)
+                        print(f"  {color}{sev.upper()}: {count}{RESET}")
+                
+                # Show top vulnerabilities
+                print(WHITE + "\nTop vulnerabilities:" + RESET)
+                sorted_vulns = sorted(
+                    all_vulns, 
+                    key=lambda v: (
+                        {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}.get(v.get("severity", "unknown"), 0),
+                        v.get("cvss_score", 0) or 0
+                    ),
+                    reverse=True
+                )
+                
+                for i, vuln in enumerate(sorted_vulns[:10], 1):  # Show top 10
+                    cve = vuln.get("cve", "N/A")
+                    desc = vuln.get("description", "No description")[:60]
+                    sev = vuln.get("severity", "unknown")
+                    port = vuln.get("port", "N/A")
+                    protocol = vuln.get("protocol", "tcp")
+                    cvss = vuln.get("cvss_score")
+                    
+                    sev_color = {
+                        "critical": "\033[91m",
+                        "high": "\033[93m",
+                        "medium": "\033[96m",
+                        "low": "\033[92m",
+                    }.get(sev, WHITE)
+                    
+                    cvss_str = f" (CVSS: {cvss:.1f})" if cvss else ""
+                    print(WHITE + f"  [{i}] {sev_color}{sev.upper()}{RESET} - Port {port}/{protocol} - {cve}{cvss_str}" + RESET)
+                    print(WHITE + f"      {desc}..." + RESET)
+                
+                if len(sorted_vulns) > 10:
+                    print(WHITE + f"  ... and {len(sorted_vulns) - 10} more vulnerabilities" + RESET)
+            
+            print(WHITE + f"\n{'='*70}\n" + RESET)
+            
+            return scan_result, all_vulns
+            
+        except Exception as e:
+            logging.error(f"Advanced vulnerability scan failed: {e}")
+            print(WHITE + f"\n⚠️  Advanced scan encountered an error: {e}" + RESET)
+            print(WHITE + "   Returning standard scan results." + RESET)
+            return scan_result, nmap_vulns or []
 
     def information_gathering(self) -> None:
         print(WHITE + "\n=== Target Type ===" + RESET)
@@ -737,18 +893,30 @@ class NetSpearNetworkAnalyzer:
             web_enum["errors"].append("wafw00f not found; skipping WAF detection.")
 
         # Directory brute-force
-        from config import DEFAULT_WORDLIST_PATH, ALTERNATIVE_WORDLISTS
-        wordlist = os.getenv("GOBUSTER_WORDLIST", DEFAULT_WORDLIST_PATH)
+        wordlist = None
+        alternative_wordlists = []
+        try:
+            from config import DEFAULT_WORDLIST_PATH, ALTERNATIVE_WORDLISTS
+            wordlist = os.getenv("GOBUSTER_WORDLIST", DEFAULT_WORDLIST_PATH)
+            alternative_wordlists = ALTERNATIVE_WORDLISTS
+        except (ImportError, AttributeError) as e:
+            msg = f"Wordlist configuration skipped: config values not found ({str(e)})."
+            web_enum["errors"].append(msg)
+            print(WHITE + f"⚠️  {msg}" + RESET)
+            logging.warning(f"Wordlist config import failed: {e}")
+            # Try to get from env var directly
+            wordlist = os.getenv("GOBUSTER_WORDLIST")
         
         # Try to find an available wordlist with better error handling
-        if not safe_file_check(wordlist, must_exist=True):
+        if wordlist and not safe_file_check(wordlist, must_exist=True):
             found = False
-            for alt_wordlist in ALTERNATIVE_WORDLISTS:
-                if safe_file_check(alt_wordlist, must_exist=True):
-                    wordlist = alt_wordlist
-                    logging.info(f"Using alternative wordlist: {wordlist}")
-                    found = True
-                    break
+            if alternative_wordlists:
+                for alt_wordlist in alternative_wordlists:
+                    if safe_file_check(alt_wordlist, must_exist=True):
+                        wordlist = alt_wordlist
+                        logging.info(f"Using alternative wordlist: {wordlist}")
+                        found = True
+                        break
             if not found:
                 print(QuickError.file_not_found(
                     wordlist, 
@@ -783,26 +951,32 @@ class NetSpearNetworkAnalyzer:
             print(WHITE + msg + RESET)
 
         # Quick admin panel probe via HEAD requests.
-        from config import ADMIN_ENDPOINTS
-        print(WHITE + "Probing common admin endpoints..." + RESET)
-        for path in ADMIN_ENDPOINTS:
-            url = base_url + path
-            try:
-                req = Request(url, method="HEAD", headers={"User-Agent": "NetSpear-AdminProbe/1.0"})
-                with urlopen(req, timeout=5) as resp:
-                    status = getattr(resp, "status", None)
-                    if status and status < 400:
-                        msg = f"{url} (status {status})"
+        try:
+            from config import ADMIN_ENDPOINTS
+            print(WHITE + "Probing common admin endpoints..." + RESET)
+            for path in ADMIN_ENDPOINTS:
+                url = base_url + path
+                try:
+                    req = Request(url, method="HEAD", headers={"User-Agent": "NetSpear-AdminProbe/1.0"})
+                    with urlopen(req, timeout=5) as resp:
+                        status = getattr(resp, "status", None)
+                        if status and status < 400:
+                            msg = f"{url} (status {status})"
+                            web_enum["admin_hits"].append(msg)
+                            print(WHITE + f"  [+] Potential admin endpoint: {msg}" + RESET)
+                except HTTPError as e:
+                    if e.code in {401, 403}:
+                        msg = f"{url} (status {e.code})"
                         web_enum["admin_hits"].append(msg)
-                        print(WHITE + f"  [+] Potential admin endpoint: {msg}" + RESET)
-            except HTTPError as e:
-                if e.code in {401, 403}:
-                    msg = f"{url} (status {e.code})"
-                    web_enum["admin_hits"].append(msg)
-                    print(WHITE + f"  [+] Restricted endpoint (possible admin): {msg}" + RESET)
-            except (URLError, TimeoutError) as exc:
-                web_enum["errors"].append(f"{url} probe failed: {exc}")
-                continue
+                        print(WHITE + f"  [+] Restricted endpoint (possible admin): {msg}" + RESET)
+                except (URLError, TimeoutError) as exc:
+                    web_enum["errors"].append(f"{url} probe failed: {exc}")
+                    continue
+        except (ImportError, AttributeError) as e:
+            msg = f"Admin endpoint probing skipped: ADMIN_ENDPOINTS not found in config ({str(e)})."
+            web_enum["errors"].append(msg)
+            print(WHITE + f"⚠️  {msg}" + RESET)
+            logging.warning(f"Admin endpoint probing skipped: {e}")
 
         # Nuclei template scan (HTTP)
         if self._is_tool_available("nuclei"):
@@ -1228,10 +1402,21 @@ class NetSpearNetworkAnalyzer:
         print(WHITE + "\n=== Exploitable Vulnerabilities ===" + RESET)
         exploitable = []
         for i, vuln in enumerate(vulnerabilities, 1):
+            if not isinstance(vuln, dict):
+                continue
             exploit_module = self.exploit_runner.suggest_exploit(vuln)
             payload = self.exploit_runner.suggest_payload(vuln)
-            print(WHITE + f"{i}. {vuln.get('cve', 'Unknown CVE')} on Port {vuln['port']}/{vuln['protocol']}: {vuln.get('description', 'No description')}" + RESET)
-            print(WHITE + f"   Service: {vuln['service']} {vuln['version']}" + RESET)
+            cve = vuln.get('cve', 'Unknown CVE')
+            port = vuln.get('port', 'N/A')
+            protocol = vuln.get('protocol', 'tcp')
+            description = vuln.get('description', 'No description')
+            service = vuln.get('service', 'unknown')
+            version = vuln.get('version', '')
+            
+            print(WHITE + f"{i}. {cve} on Port {port}/{protocol}: {description}" + RESET)
+            if service or version:
+                version_str = f" {version}" if version else ""
+                print(WHITE + f"   Service: {service}{version_str}" + RESET)
             if exploit_module:
                 print(WHITE + f"   Suggested Exploit: {exploit_module} with payload {payload}" + RESET)
                 exploitable.append((vuln, exploit_module))
@@ -1304,21 +1489,65 @@ class NetSpearNetworkAnalyzer:
                 if result and isinstance(result, tuple) and len(result) == 2:
                     scan_result, vulnerabilities = result
                     suggestions = self._build_suggestions(scan_result, vulnerabilities)
-                    web_enum = self._prompt_web_actions(target_ip, scan_result)
-                    self.reporter.add_scan(target_ip, action["desc"], scan_result, vulnerabilities, suggestions, web_enum)
-                    self._update_current_target(target_ip, action["desc"], scan_result, vulnerabilities, web_enum)
-                    self._print_suggestions(suggestions)
+                    
+                    # Try web enumeration, but don't fail if it errors
+                    web_enum = {}
+                    try:
+                        web_enum = self._prompt_web_actions(target_ip, scan_result)
+                    except Exception as web_err:
+                        error_msg = f"Web enumeration skipped due to error: {str(web_err)}"
+                        logging.warning(f"Web enumeration failed: {web_err}", exc_info=True)
+                        print(WHITE + f"\n⚠️  {error_msg}" + RESET)
+                        print(WHITE + "   Scan results will still be saved. Continuing..." + RESET)
+                        web_enum = {"errors": [error_msg], "base_url": ""}
+                    
+                    # Always save scan results, even if web_enum failed
+                    try:
+                        self.reporter.add_scan(target_ip, action["desc"], scan_result, vulnerabilities, suggestions, web_enum)
+                        self._update_current_target(target_ip, action["desc"], scan_result, vulnerabilities, web_enum)
+                        print(WHITE + f"\n✓ Scan results saved successfully." + RESET)
+                    except Exception as save_err:
+                        error_msg = f"Failed to save scan results: {str(save_err)}"
+                        logging.error(error_msg, exc_info=True)
+                        print(WHITE + f"\n⚠️  {error_msg}" + RESET)
+                        print(WHITE + "   Results are still available in memory." + RESET)
+                    
+                    # Print suggestions if available
+                    if suggestions:
+                        try:
+                            self._print_suggestions(suggestions)
+                        except Exception as sugg_err:
+                            logging.warning(f"Failed to print suggestions: {sugg_err}")
+                            print(WHITE + f"⚠️  Suggestions display skipped: {str(sugg_err)}" + RESET)
+                    
+                    # Try exploit suggestions if vulnerabilities found
                     if "vuln" in action["desc"].lower() and vulnerabilities:
-                        self.exploit_vulnerabilities(target_ip, vulnerabilities)
+                        try:
+                            self.exploit_vulnerabilities(target_ip, vulnerabilities)
+                        except Exception as exploit_err:
+                            logging.warning(f"Exploit suggestions failed: {exploit_err}")
+                            print(WHITE + f"⚠️  Exploit suggestions skipped: {str(exploit_err)}" + RESET)
             except KeyboardInterrupt:
                 print(WHITE + "Operation aborted by user." + RESET)
             except (KeyboardInterrupt, SystemExit):
                 raise
             except (ValueError, OSError, FileNotFoundError) as exc:
-                print(WHITE + f"Error running '{action['desc']}': {exc}" + RESET)
+                error_msg = f"Error running '{action['desc']}': {exc}"
+                print(WHITE + f"⚠️  {error_msg}" + RESET)
                 logging.error("Menu action failed: %s - %s", action["desc"], exc)
+                # Try to save any partial results if available
+                if target_ip and hasattr(self, 'current_target_info') and self.current_target_info.get("ip") == target_ip:
+                    try:
+                        partial_scan = self.current_target_info.get("scan_result", {})
+                        if partial_scan:
+                            print(WHITE + "   Attempting to save partial results..." + RESET)
+                            self.reporter.add_scan(target_ip, f"{action['desc']} (partial)", partial_scan, [], [], {})
+                    except Exception:
+                        pass
             except Exception as exc:
-                print(WHITE + f"Unexpected error running '{action['desc']}': {exc}" + RESET)
+                error_msg = f"Unexpected error running '{action['desc']}': {exc}"
+                print(WHITE + f"⚠️  {error_msg}" + RESET)
+                print(WHITE + "   Operation cancelled, but any gathered data is preserved in memory." + RESET)
                 logging.exception("Unexpected error in menu action: %s", action["desc"])
 
     def _base_options(self) -> Dict[str, Dict[str, Any]]:
@@ -1332,6 +1561,7 @@ class NetSpearNetworkAnalyzer:
             "12": {"desc": "Vulnerability Assessment", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "vuln", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
             "13": {"desc": "Stealth Port Scan", "handler": lambda ip: self.scanner.run_nmap_scan(ip, "stealth", self.args.stealth, self.args.proxy, self.mode), "needs_target": True},
             "14": {"desc": "Multi-Target Scan", "handler": lambda _: self._handle_multi_target_scan(), "needs_target": False},
+            "15": {"desc": "Comprehensive Vulnerability Assessment", "handler": lambda ip: self._advanced_vulnerability_scan(ip), "needs_target": True},
             "20": {"desc": "Generate Payloads", "handler": lambda ip: self.payload_generator.generate_payloads(ip), "needs_target": True},
             "21": {"desc": self._mode_payload_pack_label(), "handler": lambda ip: self.payload_generator.generate_mode_payloads(self.mode, ip), "needs_target": True},
             "22": {"desc": self._mode_brute_label(), "handler": lambda ip: self.attacker.credential_testing(ip), "needs_target": True},
@@ -1384,7 +1614,8 @@ class NetSpearNetworkAnalyzer:
                 ("11", "Comprehensive Port Scan"),
                 ("12", "Vulnerability Assessment"),
                 ("13", "Stealth Port Scan"),
-                ("14", "Multi-Target Scan")
+                ("14", "Multi-Target Scan"),
+                ("15", "Comprehensive Vulnerability Assessment")
             ]),
             ("3 — EXPLOITATION & TESTING", [
                 ("20", "Generate Payloads"),

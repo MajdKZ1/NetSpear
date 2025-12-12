@@ -14,6 +14,14 @@ import shutil
 from config import MAX_SCAN_TIMEOUT, MAX_WORKERS
 from utils import WHITE, RESET, validate_ip
 
+# Import advanced vulnerability scanner
+try:
+    from advanced_vuln_scanner import AdvancedVulnerabilityScanner
+    ADVANCED_SCANNER_AVAILABLE = True
+except ImportError:
+    ADVANCED_SCANNER_AVAILABLE = False
+    logging.warning("Advanced vulnerability scanner not available")
+
 NETSPEAR_PURPLE = "\033[38;2;122;6;205m"
 
 def spinner_task(done_event: threading.Event) -> None:
@@ -38,8 +46,18 @@ def progress_bar_task(done_event: threading.Event) -> None:
     sys.stdout.flush()
 
 class NetworkScanner:
-    def __init__(self):
+    def __init__(self, enable_advanced_scanning: bool = True):
         self.scan_results = {}
+        self.enable_advanced_scanning = enable_advanced_scanning and ADVANCED_SCANNER_AVAILABLE
+        self.advanced_scanner = None
+        if self.enable_advanced_scanning:
+            try:
+                nvd_api_key = os.getenv("NVD_API_KEY")
+                self.advanced_scanner = AdvancedVulnerabilityScanner(nvd_api_key=nvd_api_key)
+                logging.info("Advanced vulnerability scanner initialized")
+            except Exception as e:
+                logging.warning(f"Failed to initialize advanced scanner: {e}")
+                self.enable_advanced_scanning = False
 
     def _requires_root_args(self, args: str) -> bool:
         raw_flags = ["-sS", "-sU", "-sA", "-sN", "-sF", "-sX", "-f", "-D", "-O"]
@@ -191,11 +209,42 @@ class NetworkScanner:
 
         result["ports"] = port_details
         self.scan_results[target_ip] = result
-        self._print_scan_results(nm, target_ip, vulnerabilities if scan_type == "vuln" else [])
+        
+        # Run advanced vulnerability scanning if enabled (for vuln scans or when explicitly requested)
+        if self.enable_advanced_scanning and self.advanced_scanner and (scan_type == "vuln" or scan_type == "deep" or scan_type == "full"):
+            try:
+                logging.info(f"Running advanced vulnerability scan on {target_ip}")
+                advanced_vulns = self.advanced_scanner.scan_comprehensive(
+                    target_ip,
+                    port_details,
+                    result
+                )
+                # Merge advanced vulnerabilities with Nmap findings
+                # Avoid duplicates by checking CVE and port
+                existing_cves = {(v.get("cve"), v.get("port")) for v in vulnerabilities if isinstance(v, dict) and v.get("cve")}
+                existing_descriptions = {(v.get("description", ""), v.get("port")) for v in vulnerabilities if isinstance(v, dict)}
+                for adv_vuln in advanced_vulns:
+                    if not isinstance(adv_vuln, dict):
+                        continue
+                    vuln_key = (adv_vuln.get("cve"), adv_vuln.get("port"))
+                    desc_key = (adv_vuln.get("description", ""), adv_vuln.get("port"))
+                    # Add if new CVE or if no CVE but unique description
+                    if (vuln_key not in existing_cves or not vuln_key[0]) and desc_key not in existing_descriptions:
+                        vulnerabilities.append(adv_vuln)
+                        if vuln_key[0]:
+                            existing_cves.add(vuln_key)
+                        existing_descriptions.add(desc_key)
+                logging.info(f"Advanced scan found {len(advanced_vulns)} additional vulnerabilities")
+            except Exception as e:
+                logging.error(f"Advanced vulnerability scan failed: {e}")
+        
+        # Only print vulnerabilities if we have them and it's a vuln scan, or if advanced scanning found some
+        should_print_vulns = (scan_type == "vuln" and vulnerabilities) or (self.enable_advanced_scanning and vulnerabilities)
+        self._print_scan_results(nm, target_ip, vulnerabilities if should_print_vulns else [])
         return result, vulnerabilities
 
     def _parse_vulnerability(self, script_id: str, output: str, target_ip: str, port: int, proto: str, service: str, version: str) -> Optional[Dict[str, str]]:
-        """Parse Nmap vuln script output for exploitable vulnerabilities."""
+        """Parse Nmap vuln script output for exploitable vulnerabilities with enhanced parsing."""
         lines = output.split('\n')
         vuln_info = {
             "target_ip": target_ip,
@@ -203,19 +252,75 @@ class NetworkScanner:
             "protocol": proto,
             "service": service,
             "version": version,
-            "script_id": script_id
+            "script_id": script_id,
+            "category": "nmap_script",
+            "detection_method": "nmap_vuln_script"
         }
+        
+        # Enhanced CVE extraction - handle multiple CVEs
+        cves = []
+        description_parts = []
+        
         for line in lines:
             line = line.strip()
-            if "CVE-" in line:
-                vuln_info["cve"] = line.split("CVE-")[1].split()[0]
-            elif "VULNERABLE" in line.upper():
-                vuln_info["description"] = line
+            if not line:
+                continue
+            
+            # Extract all CVEs from the line
+            cve_matches = re.findall(r'CVE-\d{4}-\d{4,}', line, re.IGNORECASE)
+            for cve in cve_matches:
+                if cve.upper() not in cves:
+                    cves.append(cve.upper())
+            
+            # Extract vulnerability state
+            if "VULNERABLE" in line.upper() or "VULN" in line.upper():
+                description_parts.append(line)
             elif "State:" in line:
-                vuln_info["state"] = line.split("State:")[1].strip()
+                state = line.split("State:")[1].strip()
+                vuln_info["state"] = state
+                if "VULNERABLE" in state.upper():
+                    description_parts.append(f"State: {state}")
             elif "IDs:" in line:
-                vuln_info["ids"] = line.split("IDs:")[1].strip()
-        return vuln_info if "cve" in vuln_info or "description" in vuln_info else None
+                ids = line.split("IDs:")[1].strip()
+                vuln_info["ids"] = ids
+                # Extract CVEs from IDs field
+                id_cves = re.findall(r'CVE-\d{4}-\d{4,}', ids, re.IGNORECASE)
+                for cve in id_cves:
+                    if cve.upper() not in cves:
+                        cves.append(cve.upper())
+            elif "Title:" in line:
+                title = line.split("Title:")[1].strip()
+                description_parts.append(title)
+            elif line and not line.startswith("|") and len(line) > 10:
+                # Potential description line
+                if not any(keyword in line.upper() for keyword in ["PORT", "STATE", "SERVICE", "VERSION"]):
+                    description_parts.append(line)
+        
+        # Set CVE (use first one if multiple)
+        if cves:
+            vuln_info["cve"] = cves[0]
+            if len(cves) > 1:
+                vuln_info["additional_cves"] = cves[1:]
+        
+        # Set description
+        if description_parts:
+            vuln_info["description"] = " | ".join(description_parts[:3])  # Limit to first 3 parts
+        elif "cve" in vuln_info:
+            vuln_info["description"] = f"Vulnerability detected: {vuln_info['cve']}"
+        
+        # Determine severity from script output
+        if "critical" in output.lower() or "CRITICAL" in output:
+            vuln_info["severity"] = "critical"
+        elif "high" in output.lower() or "HIGH" in output:
+            vuln_info["severity"] = "high"
+        elif "medium" in output.lower() or "MEDIUM" in output:
+            vuln_info["severity"] = "medium"
+        elif "low" in output.lower() or "LOW" in output:
+            vuln_info["severity"] = "low"
+        else:
+            vuln_info["severity"] = "medium"  # Default
+        
+        return vuln_info if ("cve" in vuln_info or "description" in vuln_info) else None
 
     def multi_target_scan(self, targets: List[str], scan_type: str, stealth: bool, proxy: Optional[str], mode: str = "SAFE") -> Dict[str, Tuple[Dict[str, str], List[Dict[str, str]]]]:
         valid_targets = [ip for ip in targets if validate_ip(ip)]
@@ -253,5 +358,19 @@ class NetworkScanner:
         if vulnerabilities:
             print(WHITE + "\n=== Detected Vulnerabilities ===" + RESET)
             for i, vuln in enumerate(vulnerabilities, 1):
-                print(WHITE + f"{i}. Port {vuln['port']}/{vuln['protocol']} - {vuln.get('cve', 'Unknown CVE')}: {vuln.get('description', 'No description')}" + RESET)
-                print(WHITE + f"   Service: {vuln['service']} {vuln['version']}" + RESET)
+                # Ensure vuln is a dictionary
+                if not isinstance(vuln, dict):
+                    logging.warning(f"Vulnerability {i} is not a dictionary: {type(vuln)}")
+                    continue
+                
+                port = vuln.get('port', 'N/A')
+                protocol = vuln.get('protocol', 'tcp')
+                cve = vuln.get('cve', 'Unknown CVE')
+                description = vuln.get('description', 'No description')
+                service = vuln.get('service', 'unknown')
+                version = vuln.get('version', '')
+                
+                print(WHITE + f"{i}. Port {port}/{protocol} - {cve}: {description}" + RESET)
+                if service or version:
+                    version_str = f" {version}" if version else ""
+                    print(WHITE + f"   Service: {service}{version_str}" + RESET)

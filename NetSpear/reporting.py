@@ -35,6 +35,12 @@ class ReportGenerator:
             return "info"
         return "unknown"
 
+    def _safe_escape(self, value: Any, default: str = '') -> str:
+        """Safely escape a value for HTML, handling None values."""
+        if value is None:
+            return html.escape(str(default))
+        return html.escape(str(value))
+
     def _risk_score_for_severity(self, severity: str) -> str:
         sev = severity.lower()
         if sev in {"critical", "high"}:
@@ -457,14 +463,17 @@ class ReportGenerator:
                             html_content += f"<tr><td>{port.get('port')}</td><td>{html.escape(port.get('protocol',''))}</td><td>{html.escape(port.get('service',''))}</td><td>{html.escape(port.get('version',''))}</td><td class='{state_class}'>{state}</td></tr>"
                     html_content += "</table>"
 
-                    vulns = scan.get("vulnerabilities", [])
-                    if vulns:
-                        html_content += "<h3 style='margin-top:14px;' id='vulnerabilities'>Vulnerabilities</h3><table><tr><th>CVE</th><th>Description</th><th>Port</th><th>Service</th><th>Risk</th></tr>"
                         for vuln in vulns:
                             sev = vuln.get("severity") or self._severity_from_text(vuln.get("description"))
                             score = self._risk_score_for_severity(sev)
-                            html_content += f"<tr><td class='vuln'>{html.escape(vuln.get('cve','Unknown'))}</td><td>{html.escape(vuln.get('description','No description'))}</td><td>{html.escape(str(vuln.get('port','-')))}</td><td>{html.escape(vuln.get('service',''))}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {html.escape(score)}</span></td></tr>"
-                        html_content += "</table>"
+                            # Safely handle None values
+                            cve = vuln.get('cve') or 'Unknown'
+                            description = vuln.get('description') or 'No description'
+                            port = vuln.get('port') or '-'
+                            service = vuln.get('service') or ''
+                            score_str = str(score) if score is not None else '-'
+                            
+                            html_content += f"<tr><td class='vuln'>{self._safe_escape(cve)}</td><td>{self._safe_escape(description)}</td><td>{self._safe_escape(port)}</td><td>{self._safe_escape(service)}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {self._safe_escape(score_str)}</span></td></tr>"
                     
                     suggestions = scan.get("suggestions", []) or []
                     if suggestions:
@@ -608,7 +617,14 @@ class ReportGenerator:
                         for vuln in vulns:
                             sev = vuln.get("severity") or self._severity_from_text(vuln.get("description"))
                             score = self._risk_score_for_severity(sev)
-                            html_content += f"<tr><td class='vuln'>{html.escape(vuln.get('cve','Unknown'))}</td><td>{html.escape(vuln.get('description','No description'))}</td><td>{html.escape(str(vuln.get('port','-')))}</td><td>{html.escape(vuln.get('service',''))}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {html.escape(score)}</span></td></tr>"
+                            # Safely handle None values
+                            cve = vuln.get('cve') or 'Unknown'
+                            description = vuln.get('description') or 'No description'
+                            port = vuln.get('port') or '-'
+                            service = vuln.get('service') or ''
+                            score_str = str(score) if score is not None else '-'
+                            
+                            html_content += f"<tr><td class='vuln'>{self._safe_escape(cve)}</td><td>{self._safe_escape(description)}</td><td>{self._safe_escape(port)}</td><td>{self._safe_escape(service)}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {self._safe_escape(score_str)}</span></td></tr>"
                         html_content += "</table>"
 
                     suggestions = recon.get("suggestions", []) or []
@@ -732,7 +748,15 @@ class ReportGenerator:
                 for vuln in all_vulns:
                     sev = vuln.get("severity") or self._severity_from_text(vuln.get("description"))
                     score = self._risk_score_for_severity(sev)
-                    html_content += f"<tr><td>{html.escape(vuln.get('target',''))}</td><td class='vuln'>{html.escape(vuln.get('cve','Unknown'))}</td><td>{html.escape(vuln.get('description','No description'))}</td><td>{html.escape(str(vuln.get('port','-')))}</td><td>{html.escape(vuln.get('service',''))}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {html.escape(score)}</span></td></tr>"
+                    # Safely handle None values
+                    target = vuln.get('target') or ''
+                    cve = vuln.get('cve') or 'Unknown'
+                    description = vuln.get('description') or 'No description'
+                    port = vuln.get('port') or '-'
+                    service = vuln.get('service') or ''
+                    score_str = str(score) if score is not None else '-'
+                    
+                    html_content += f"<tr><td>{self._safe_escape(target)}</td><td class='vuln'>{self._safe_escape(cve)}</td><td>{self._safe_escape(description)}</td><td>{self._safe_escape(port)}</td><td>{self._safe_escape(service)}</td><td>{self._severity_badge(sev)} <span class='muted' style='margin-left:6px;'>CVSS: {self._safe_escape(score_str)}</span></td></tr>"
                 html_content += "</table></div>"
 
             html_content += "<div class='card' style='margin-top:16px;' id='appendix'><h2>Appendix (JSON dump)</h2><p class='muted'>Download the full report data as JSON.</p><button class='btn secondary' id='btn-json'>Download JSON</button></div>"
